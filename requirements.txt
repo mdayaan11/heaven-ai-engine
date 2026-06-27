@@ -7,3 +7,4 @@ PyGithub
 redis
 httpx
 e2b
+sse-starlette
