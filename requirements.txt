@@ -2,9 +2,8 @@ fastapi
 uvicorn[standard]
 python-dotenv
 pydantic
-google-generativeai
-PyGithub
-redis
 httpx
-e2b
+tenacity
+redis
 sse-starlette
+e2b-code-interpreter
