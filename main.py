@@ -39,9 +39,10 @@ ALLOWED_ORIGINS = os.environ.get(
     "https://heavenaii.netlify.app,http://localhost:3000"
 ).split(",")
 
+# FIX: Can't use allow_origins=["*"] with allow_credentials=True — use explicit origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -68,7 +69,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:app",
-        host=os.environ.get("HOST", "0.0.0.0"),
+        host="0.0.0.0",
         port=int(os.environ.get("PORT", 10000)),
         reload=False,
         log_level="info",
