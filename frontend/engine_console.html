@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>HEAVEN.AI — Autonomous Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --black:#020205;--surface:#0E0E13;--surface2:#14141C;--border:#1C1C28;
+  --blue:#2563EB;--blue-b:#3B82F6;--blue-l:#60A5FA;
+  --green:#10B981;--yellow:#F59E0B;--red:#EF4444;--purple:#7C3AED;
+  --gray:#6B7280;--gray2:#9CA3AF;--white:#FFFFFF;
+  --mono:'JetBrains Mono',monospace;
+}
+html,body{height:100%;background:var(--black);color:#fff;font-family:'Space Grotesk',sans-serif;-webkit-font-smoothing:antialiased;}
+::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:var(--blue);border-radius:3px;}
+
+/* ── Layout ── */
+.engine-layout{display:grid;grid-template-columns:380px 1fr;grid-template-rows:64px 1fr;height:100vh;overflow:hidden;}
+@media(max-width:900px){.engine-layout{grid-template-columns:1fr;grid-template-rows:56px auto 1fr;}}
+
+/* ── Topbar ── */
+.topbar{grid-column:span 2;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid var(--border);background:rgba(2,2,5,.8);backdrop-filter:blur(20px);}
+.topbar-logo{font-size:1.1rem;font-weight:900;letter-spacing:-.04em;}
+.topbar-logo span{background:linear-gradient(135deg,#2563EB,#93C5FD);-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.topbar-status{display:flex;align-items:center;gap:8px;font-size:12px;font-family:var(--mono);color:var(--gray2);}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s ease infinite;}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* ── Sidebar (input panel) ── */
+.sidebar{border-right:1px solid var(--border);background:var(--surface);overflow-y:auto;display:flex;flex-direction:column;}
+.sidebar-section{padding:20px;border-bottom:1px solid var(--border);}
+.sidebar-title{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray);font-family:var(--mono);margin-bottom:14px;}
+.phase-indicator{display:flex;flex-direction:column;gap:6px;}
+.phase-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:10px;border:1px solid transparent;transition:all .3s;font-size:12px;font-family:var(--mono);}
+.phase-item.active{background:rgba(37,99,235,.12);border-color:rgba(59,130,246,.3);color:#60A5FA;}
+.phase-item.done{background:rgba(16,185,129,.08);border-color:rgba(16,185,129,.2);color:#10B981;}
+.phase-item.pending{color:var(--gray);}
+.phase-item.error{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.2);color:#EF4444;}
+.phase-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.phase-item.active .phase-dot{background:var(--blue-b);animation:pulse 1.5s ease infinite;}
+.phase-item.done .phase-dot{background:var(--green);}
+.phase-item.pending .phase-dot{background:var(--border);border:1px solid var(--gray);}
+.phase-item.error .phase-dot{background:var(--red);}
+
+/* Form */
+label{display:block;font-size:11px;color:var(--gray2);margin-bottom:5px;letter-spacing:.04em;}
+input,textarea,select{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 13px;color:#fff;font-size:13px;font-family:'Space Grotesk',sans-serif;outline:none;transition:border .2s;}
+input:focus,textarea:focus,select:focus{border-color:rgba(59,130,246,.5);box-shadow:0 0 0 3px rgba(37,99,235,.08);}
+textarea{resize:none;min-height:100px;line-height:1.6;}
+input::placeholder,textarea::placeholder{color:#252535;}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.form-group{margin-bottom:12px;}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:12px;font-size:13px;font-weight:600;cursor:pointer;border:none;transition:all .25s;font-family:'Space Grotesk',sans-serif;}
+.btn-primary{background:linear-gradient(135deg,#1A3A6B,#2563EB,#3B82F6);color:#fff;width:100%;justify-content:center;position:relative;overflow:hidden;}
+.btn-primary::after{content:'';position:absolute;top:-50%;left:-80%;width:40%;height:200%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);transform:skewX(-20deg);animation:shim 2.5s ease infinite;}
+@keyframes shim{0%{left:-80%}100%{left:130%}}
+.btn-primary:hover{box-shadow:0 0 40px rgba(37,99,235,.6);transform:translateY(-1px);}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
+.btn-ghost{background:rgba(255,255,255,.04);color:var(--gray2);border:1px solid var(--border);}
+.btn-ghost:hover{background:rgba(255,255,255,.08);color:#fff;}
+.btn-success{background:linear-gradient(135deg,#065F46,#10B981);color:#fff;}
+.btn-danger{background:linear-gradient(135deg,#7F1D1D,#EF4444);color:#fff;}
+
+/* Pricing badge */
+.price-badge{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-radius:12px;border:1px solid rgba(245,158,11,.25);background:rgba(245,158,11,.06);margin-top:4px;}
+.price-val{font-size:1.4rem;font-weight:900;letter-spacing:-.04em;color:#F59E0B;}
+.complexity-bar{height:4px;background:var(--border);border-radius:99px;overflow:hidden;margin-top:8px;}
+.complexity-fill{height:100%;background:linear-gradient(90deg,#10B981,#F59E0B,#EF4444);border-radius:99px;width:0;transition:width 1s cubic-bezier(.16,1,.3,1);}
+
+/* ── Main console ── */
+.console-panel{display:flex;flex-direction:column;overflow:hidden;background:var(--black);}
+.console-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
+.console-dots{display:flex;gap:6px;}
+.cdot{width:10px;height:10px;border-radius:50%;}
+.console-title{font-size:12px;font-family:var(--mono);color:var(--gray2);}
+.console-live{display:flex;align-items:center;gap:6px;margin-left:auto;font-size:11px;font-family:var(--mono);color:var(--green);}
+.console-body{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:3px;font-family:var(--mono);font-size:12px;line-height:1.7;}
+
+/* Log lines */
+.log-line{display:flex;gap:10px;padding:3px 0;animation:logIn .25s ease forwards;opacity:0;}
+@keyframes logIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+.log-ts{color:var(--gray);flex-shrink:0;font-size:10px;padding-top:2px;}
+.log-tag{font-weight:600;flex-shrink:0;}
+.log-tag.system{color:var(--blue-l);}
+.log-tag.success{color:var(--green);}
+.log-tag.warning{color:var(--yellow);}
+.log-tag.error{color:var(--red);}
+.log-tag.info{color:var(--gray2);}
+.log-msg{color:#D1D5DB;word-break:break-all;}
+.log-separator{height:1px;background:var(--border);margin:8px 0;opacity:.5;}
+.typing-cursor{display:inline-block;width:8px;height:13px;background:var(--blue-b);border-radius:1px;animation:blink .8s ease infinite;vertical-align:middle;margin-left:4px;}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ── Scoping Questions Panel ── */
+.questions-panel{margin:16px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:20px;display:none;}
+.questions-panel.visible{display:block;}
+.q-item{margin-bottom:16px;}
+.q-text{font-size:13px;font-weight:600;color:#fff;margin-bottom:10px;line-height:1.5;}
+.q-options{display:flex;flex-direction:column;gap:6px;}
+.q-option{display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);cursor:pointer;font-size:12px;font-family:var(--mono);transition:all .2s;}
+.q-option:hover,.q-option.selected{border-color:rgba(59,130,246,.5);background:rgba(37,99,235,.1);color:#60A5FA;}
+.q-option input[type=radio]{accent-color:var(--blue-b);}
+.submit-answers-btn{margin-top:16px;}
+
+/* ── Delivery Panel ── */
+.delivery-panel{display:none;flex-direction:column;gap:16px;padding:20px;background:var(--surface);border:1px solid rgba(16,185,129,.25);border-radius:16px;margin:16px;}
+.delivery-panel.visible{display:flex;}
+.delivery-url{display:flex;align-items:center;gap:12px;padding:14px 16px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.25);border-radius:12px;}
+.delivery-url a{color:#10B981;text-decoration:none;font-family:var(--mono);font-size:13px;font-weight:600;word-break:break-all;}
+.delivery-url a:hover{text-decoration:underline;}
+.delivery-actions{display:flex;gap:8px;flex-wrap:wrap;}
+.confetti-emoji{font-size:2rem;animation:bounce .8s ease infinite;}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+
+/* ── Progress Bar ── */
+.progress-strip{height:2px;background:var(--border);flex-shrink:0;position:relative;overflow:hidden;}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--purple),var(--blue-l));background-size:200%;animation:progressShift 2s linear infinite;width:0;transition:width .8s ease;}
+@keyframes progressShift{0%{background-position:0%}100%{background-position:200%}}
+
+/* ── Env Markdown Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);z-index:100;display:none;align-items:center;justify-content:center;padding:24px;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:20px;max-width:680px;width:100%;max-height:80vh;overflow-y:auto;padding:28px;}
+.modal pre{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;font-family:var(--mono);overflow-x:auto;line-height:1.7;color:#D1D5DB;}
+</style>
+</head>
+<body>
+
+<!-- ENV Modal -->
+<div class="modal-overlay" id="env-modal" onclick="closeEnvModal(event)">
+  <div class="modal">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="font-size:1rem;font-weight:700;">🔒 Environment Variables</h3>
+      <button onclick="document.getElementById('env-modal').classList.remove('open')" class="btn btn-ghost" style="padding:6px 12px;">✕</button>
+    </div>
+    <pre id="env-content">Loading...</pre>
+  </div>
+</div>
+
+<div class="engine-layout">
+  <!-- Topbar -->
+  <div class="topbar">
+    <div class="topbar-logo">HEAVEN<span>.AI</span> ENGINE</div>
+    <div class="topbar-status">
+      <span class="status-dot"></span>
+      <span id="status-text">Ready</span>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <!-- Phase tracker -->
+    <div class="sidebar-section">
+      <div class="sidebar-title">Build Pipeline</div>
+      <div class="phase-indicator">
+        <div class="phase-item pending" id="ph-scoping">
+          <span class="phase-dot"></span>
+          <span>01 Scoping & Alignment</span>
+        </div>
+        <div class="phase-item pending" id="ph-architecture">
+          <span class="phase-dot"></span>
+          <span>02 Architecture</span>
+        </div>
+        <div class="phase-item pending" id="ph-synthesis">
+          <span class="phase-dot"></span>
+          <span>03 Code Synthesis</span>
+        </div>
+        <div class="phase-item pending" id="ph-security">
+          <span class="phase-dot"></span>
+          <span>04 Security Scan</span>
+        </div>
+        <div class="phase-item pending" id="ph-deployment">
+          <span class="phase-dot"></span>
+          <span>05 Production Deploy</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pricing estimate -->
+    <div class="sidebar-section" id="pricing-section" style="display:none;">
+      <div class="sidebar-title">Estimate</div>
+      <div class="price-badge">
+        <div>
+          <div style="font-size:10px;color:var(--gray);font-family:var(--mono);">Price Range</div>
+          <div class="price-val" id="price-display">$—</div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:10px;color:var(--gray);font-family:var(--mono);">Build Time</div>
+          <div style="font-size:1.1rem;font-weight:700;color:#fff;" id="time-display">—</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;">
+        <div style="font-size:10px;color:var(--gray);font-family:var(--mono);margin-bottom:4px;">Complexity</div>
+        <div class="complexity-bar"><div class="complexity-fill" id="complexity-bar"></div></div>
+        <div style="font-size:10px;color:var(--gray2);font-family:var(--mono);margin-top:4px;" id="complexity-score">—</div>
+      </div>
+    </div>
+
+    <!-- Input form -->
+    <div class="sidebar-section" id="form-section">
+      <div class="sidebar-title">New Project Brief</div>
+      <form id="build-form" onsubmit="startBuild(event)">
+        <div class="form-row" style="margin-bottom:12px;">
+          <div class="form-group" style="margin:0;">
+            <label for="client-name">Your Name</label>
+            <input id="client-name" type="text" placeholder="Alex Rivera" required/>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label for="client-email">Email</label>
+            <input id="client-email" type="email" placeholder="alex@co.com" required/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="deploy-target">Deploy Target</label>
+          <select id="deploy-target">
+            <option value="vercel">Vercel (Next.js / Frontend)</option>
+            <option value="render">Render (Full-Stack / Backend)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="project-idea">Project Idea (plain English)</label>
+          <textarea id="project-idea" placeholder="E.g. Build me a SaaS dashboard for freelancers to track invoices and clients. I need login, a dashboard with charts, invoice generator, and Stripe payments." required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" id="submit-btn">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none"><path d="M7.5 1L14 7.5 7.5 14M14 7.5H1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Launch Autonomous Build
+        </button>
+      </form>
+    </div>
+
+    <!-- Stats -->
+    <div class="sidebar-section">
+      <div class="sidebar-title">Session Stats</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:var(--mono);">
+          <span style="color:var(--gray);">Log entries</span><span id="stat-logs">0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:var(--mono);">
+          <span style="color:var(--gray);">Files generated</span><span id="stat-files">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:var(--mono);">
+          <span style="color:var(--gray);">Correction loops</span><span id="stat-loops">0</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-family:var(--mono);">
+          <span style="color:var(--gray);">Build status</span><span id="stat-status" style="color:var(--green);">—</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main console -->
+  <div class="console-panel">
+    <div class="console-header">
+      <div class="console-dots">
+        <div class="cdot" style="background:#EF4444;opacity:.7;"></div>
+        <div class="cdot" style="background:#F59E0B;opacity:.7;"></div>
+        <div class="cdot" style="background:#10B981;opacity:.7;"></div>
+      </div>
+      <span class="console-title">heaven-engine · autonomous-build · output</span>
+      <div class="console-live" id="live-indicator" style="display:none;">
+        <span style="position:relative;display:flex;"><span style="animation:pulse 1.2s ease-out infinite;position:absolute;inset:0;border-radius:50%;background:#10B981;opacity:.6;"></span><span style="width:7px;height:7px;background:#10B981;border-radius:50%;display:block;"></span></span>
+        LIVE
+      </div>
+    </div>
+    <div class="progress-strip"><div class="progress-fill" id="progress-bar"></div></div>
+
+    <!-- Console body -->
+    <div class="console-body" id="console-body">
+      <div class="log-line" style="opacity:1;">
+        <span class="log-ts">00:00</span>
+        <span class="log-tag system">HEAVEN.AI ENGINE v2.0</span>
+        <span class="log-msg">Ready. Enter your project brief and launch the autonomous build pipeline.</span>
+      </div>
+      <div class="log-line" style="opacity:1;">
+        <span class="log-ts">00:00</span>
+        <span class="log-tag info">SYSTEM</span>
+        <span class="log-msg">Claude 3.5 Sonnet · E2B Sandbox · GitHub API · Vercel Deploy — all systems nominal.</span>
+      </div>
+    </div>
+
+    <!-- Scoping Q panel -->
+    <div class="questions-panel" id="questions-panel">
+      <div style="font-size:11px;font-family:var(--mono);color:var(--blue-l);letter-spacing:.08em;margin-bottom:16px;">◈ SCOPING QUESTIONS — Answer to proceed to build</div>
+      <div id="questions-container"></div>
+      <button class="btn btn-primary submit-answers-btn" id="submit-answers-btn" onclick="submitAnswers()">
+        Confirm & Start Full Build →
+      </button>
+    </div>
+
+    <!-- Delivery panel -->
+    <div class="delivery-panel" id="delivery-panel">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <span class="confetti-emoji">🎉</span>
+        <div>
+          <div style="font-size:1.1rem;font-weight:800;letter-spacing:-.02em;">Build Complete!</div>
+          <div style="font-size:12px;color:var(--gray2);font-family:var(--mono);">Your production app is live and deployed.</div>
+        </div>
+      </div>
+      <div class="delivery-url">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="#10B981" stroke-width="1.5"/><path d="M1 8h14M8 1a11 11 0 0 1 0 14M8 1a11 11 0 0 0 0 14" stroke="#10B981" stroke-width="1.2"/></svg>
+        <a href="#" id="prod-url" target="_blank">—</a>
+      </div>
+      <div class="delivery-url" style="border-color:rgba(59,130,246,.25);background:rgba(37,99,235,.06);">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8c0 2.87 1.87 5.3 4.45 6.16.33.06.45-.14.45-.31v-1.1c-1.8.39-2.18-.87-2.18-.87-.3-.76-.73-.96-.73-.96-.6-.41.04-.4.04-.4.66.05 1.01.68 1.01.68.59 1.01 1.55.72 1.93.55.06-.43.23-.72.42-.89-1.44-.16-2.95-.72-2.95-3.2 0-.71.25-1.29.67-1.74-.07-.16-.29-.83.06-1.72 0 0 .55-.18 1.8.67A6.27 6.27 0 0 1 8 5.07c.56 0 1.12.07 1.64.22 1.25-.85 1.8-.67 1.8-.67.35.9.13 1.56.06 1.72.42.45.67 1.03.67 1.74 0 2.49-1.52 3.04-2.96 3.2.23.2.44.59.44 1.19v1.77c0 .17.12.38.45.31A6.52 6.52 0 0 0 14.5 8C14.5 4.41 11.59 1.5 8 1.5z" fill="#3B82F6"/></svg>
+        <a href="#" id="github-url" target="_blank" style="color:#60A5FA;">GitHub Repository →</a>
+      </div>
+      <div class="delivery-actions">
+        <button class="btn btn-ghost" onclick="showEnvModal()" style="font-size:12px;">🔒 View .env Setup</button>
+        <button class="btn btn-ghost" onclick="downloadSource()" style="font-size:12px;">⬇ Download Source</button>
+        <button class="btn btn-ghost" onclick="resetEngine()" style="font-size:12px;">↻ New Project</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ══════════════════════════════════════════════════════
+// Config
+// ══════════════════════════════════════════════════════
+const API_BASE = 'http://localhost:8000';  // Change to your production URL
+let currentTaskId = null;
+let eventSource = null;
+let logCount = 0;
+let buildStartTime = null;
+let currentEnvMarkdown = '';
+
+// Phase → progress % map
+const PHASE_PROGRESS = {
+  QUEUED: 5, SCOPING: 18, ARCHITECTURE: 38, SYNTHESIS: 62,
+  SECURITY_SCAN: 80, DEPLOYMENT: 92, COMPLETE: 100, FAILED: 100,
+};
+const PHASE_EL_MAP = {
+  SCOPING: 'ph-scoping', ARCHITECTURE: 'ph-architecture',
+  SYNTHESIS: 'ph-synthesis', SECURITY_SCAN: 'ph-security',
+  DEPLOYMENT: 'ph-deployment', COMPLETE: 'ph-deployment',
+};
+
+// ══════════════════════════════════════════════════════
+// Start Build
+// ══════════════════════════════════════════════════════
+async function startBuild(e) {
+  e.preventDefault();
+  const name = document.getElementById('client-name').value.trim();
+  const email = document.getElementById('client-email').value.trim();
+  const idea = document.getElementById('project-idea').value.trim();
+  const deploy = document.getElementById('deploy-target').value;
+
+  if (!name || !email || !idea) return;
+
+  document.getElementById('submit-btn').disabled = true;
+  document.getElementById('status-text').textContent = 'Initializing...';
+  document.getElementById('live-indicator').style.display = 'flex';
+  buildStartTime = Date.now();
+
+  addSeparator();
+  addLog('system', 'SYS_LOG: INIT', `New build request from ${name} (${email})`, Date.now());
+  addLog('info', 'SYS_LOG: INIT', `Project: "${idea.slice(0, 80)}..."`, Date.now());
+  addLog('system', 'SYS_LOG: ALIGNING_PROMPT', 'Connecting to Heaven AI Engine backend...', Date.now());
+
+  try {
+    const res = await fetch(`${API_BASE}/api/build/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_idea: idea,
+        client_name: name,
+        client_email: email,
+        deploy_target: deploy,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Failed to start build');
+
+    currentTaskId = data.task_id;
+    addLog('success', 'SYS_LOG: INIT', `✅ Task created — ID: ${currentTaskId.slice(0, 8)}...`, Date.now());
+    addLog('system', 'SYS_LOG: ALIGNING_PROMPT', 'Analyzing your business requirements...', Date.now());
+    document.getElementById('status-text').textContent = `Task ${currentTaskId.slice(0,8)}`;
+
+    // Open SSE stream
+    openStream(currentTaskId);
+  } catch (err) {
+    addLog('error', 'SYS_LOG: ERROR', `❌ Failed to connect to engine: ${err.message}`, Date.now());
+    addLog('info', 'SYS_LOG: INFO', 'Make sure the Heaven AI Engine server is running at ' + API_BASE, Date.now());
+    document.getElementById('submit-btn').disabled = false;
+    document.getElementById('status-text').textContent = 'Error';
+  }
+}
+
+// ══════════════════════════════════════════════════════
+// SSE Stream
+// ══════════════════════════════════════════════════════
+function openStream(taskId) {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource(`${API_BASE}/api/build/${taskId}/stream`);
+
+  eventSource.addEventListener('log', (e) => {
+    const entry = JSON.parse(e.data);
+    addLog(
+      entry.level.toLowerCase(),
+      entry.tag || 'LOG',
+      entry.message,
+      entry.timestamp * 1000,
+    );
+    logCount++;
+    document.getElementById('stat-logs').textContent = logCount;
+
+    // Update stats from metadata
+    if (entry.metadata) {
+      if (entry.metadata.correction_loops_used !== undefined) {
+        document.getElementById('stat-loops').textContent = entry.metadata.correction_loops_used;
+      }
+      if (entry.metadata.files) {
+        document.getElementById('stat-files').textContent = entry.metadata.files.length;
+      }
+    }
+  });
+
+  eventSource.addEventListener('phase_change', (e) => {
+    const { phase } = JSON.parse(e.data);
+    updatePhase(phase);
+  });
+
+  eventSource.addEventListener('scoping_ready', (e) => {
+    const scoping = JSON.parse(e.data);
+    showScopingQuestions(scoping);
+    if (scoping.estimated_price_usd) {
+      document.getElementById('pricing-section').style.display = 'block';
+      document.getElementById('price-display').textContent = `$${Math.round(scoping.estimated_price_usd)}`;
+      document.getElementById('time-display').textContent = `${scoping.estimated_build_time_minutes}m`;
+      const pct = (scoping.complexity_score / 10) * 100;
+      document.getElementById('complexity-bar').style.width = pct + '%';
+      document.getElementById('complexity-score').textContent = `Complexity: ${scoping.complexity_score}/10`;
+    }
+  });
+
+  eventSource.addEventListener('complete', (e) => {
+    const deploy = JSON.parse(e.data);
+    showDelivery(deploy);
+    currentEnvMarkdown = deploy.env_variables_markdown || '';
+    eventSource.close();
+    document.getElementById('status-text').textContent = 'Complete';
+    document.getElementById('stat-status').textContent = '✅ Built & Deployed';
+    document.getElementById('stat-status').style.color = 'var(--green)';
+  });
+
+  eventSource.addEventListener('error', (e) => {
+    try {
+      const err = JSON.parse(e.data);
+      addLog('error', 'SYS_LOG: ERROR', `❌ Build failed: ${err.message}`, Date.now());
+    } catch {}
+    updatePhase('FAILED');
+    eventSource.close();
+    document.getElementById('submit-btn').disabled = false;
+    document.getElementById('status-text').textContent = 'Failed';
+    document.getElementById('stat-status').textContent = '❌ Failed';
+    document.getElementById('stat-status').style.color = 'var(--red)';
+  });
+
+  eventSource.onerror = () => {
+    addLog('warning', 'SYS_LOG: CONN', 'Stream connection interrupted. Reconnecting...', Date.now());
+  };
+}
+
+// ══════════════════════════════════════════════════════
+// UI Helpers
+// ══════════════════════════════════════════════════════
+function addLog(level, tag, message, tsMs) {
+  const body = document.getElementById('console-body');
+  const elapsed = buildStartTime ? ((tsMs - buildStartTime) / 1000).toFixed(1) : '0.0';
+  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0');
+  const ss = String(Math.floor(elapsed % 60)).padStart(2, '0');
+  const el = document.createElement('div');
+  el.className = 'log-line';
+  el.innerHTML = `
+    <span class="log-ts">${mm}:${ss}</span>
+    <span class="log-tag ${level}">${tag}</span>
+    <span class="log-msg">${escHtml(message)}</span>
+  `;
+  body.appendChild(el);
+  body.scrollTop = body.scrollHeight;
+}
+
+function addSeparator() {
+  const body = document.getElementById('console-body');
+  const sep = document.createElement('div');
+  sep.className = 'log-separator';
+  body.appendChild(sep);
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function updatePhase(phase) {
+  // Reset all phases
+  document.querySelectorAll('.phase-item').forEach(el => {
+    if (!el.classList.contains('done')) {
+      el.classList.remove('active', 'error');
+      el.classList.add('pending');
+    }
+  });
+
+  if (phase === 'FAILED') {
+    document.querySelectorAll('.phase-item.active').forEach(el => {
+      el.classList.remove('active');
+      el.classList.add('error');
+    });
+    return;
+  }
+
+  const phases = ['SCOPING', 'ARCHITECTURE', 'SYNTHESIS', 'SECURITY_SCAN', 'DEPLOYMENT'];
+  const idx = phases.indexOf(phase);
+  phases.forEach((p, i) => {
+    const elId = PHASE_EL_MAP[p];
+    const el = document.getElementById(elId);
+    if (!el) return;
+    el.classList.remove('pending', 'active', 'done', 'error');
+    if (i < idx) el.classList.add('done');
+    else if (i === idx) el.classList.add('active');
+    else el.classList.add('pending');
+  });
+
+  if (phase === 'COMPLETE') {
+    document.querySelectorAll('.phase-item').forEach(el => {
+      el.classList.remove('active');
+      el.classList.add('done');
+    });
+  }
+
+  // Update progress bar
+  const pct = PHASE_PROGRESS[phase] || 0;
+  document.getElementById('progress-bar').style.width = pct + '%';
+}
+
+function showScopingQuestions(scoping) {
+  const panel = document.getElementById('questions-panel');
+  const container = document.getElementById('questions-container');
+  container.innerHTML = '';
+
+  (scoping.questions || []).forEach((q, qi) => {
+    const div = document.createElement('div');
+    div.className = 'q-item';
+    div.innerHTML = `<div class="q-text">${qi + 1}. ${escHtml(q.question_text)}</div>`;
+    if (q.options && q.options.length) {
+      const opts = document.createElement('div');
+      opts.className = 'q-options';
+      q.options.forEach((opt, oi) => {
+        const label = document.createElement('label');
+        label.className = 'q-option';
+        label.innerHTML = `
+          <input type="radio" name="q_${q.question_id}" value="${escHtml(opt)}" style="accent-color:var(--blue-b);"/>
+          ${escHtml(opt)}
+        `;
+        label.querySelector('input').addEventListener('change', () => {
+          opts.querySelectorAll('.q-option').forEach(l => l.classList.remove('selected'));
+          label.classList.add('selected');
+        });
+        opts.appendChild(label);
+      });
+      div.appendChild(opts);
+    } else {
+      div.innerHTML += `<input type="text" id="q_${q.question_id}" placeholder="Your answer..." style="margin-top:8px;"/>`;
+    }
+    container.appendChild(div);
+  });
+
+  panel.classList.add('visible');
+  addSeparator();
+  addLog('system', 'SYS_LOG: ALIGNING_PROMPT', '⏸ Scoping complete. Answer the questions below to proceed.', Date.now());
+}
+
+async function submitAnswers() {
+  if (!currentTaskId) return;
+  const answers = {};
+  document.querySelectorAll('.q-item').forEach((item, qi) => {
+    const radio = item.querySelector('input[type=radio]:checked');
+    const text = item.querySelector('input[type=text]');
+    const qId = radio
+      ? radio.name.replace('q_', '')
+      : (text ? text.id.replace('q_', '') : `q${qi + 1}`);
+    answers[qId] = radio ? radio.value : (text ? text.value : '');
+  });
+
+  document.getElementById('submit-answers-btn').disabled = true;
+  document.getElementById('questions-panel').classList.remove('visible');
+  addSeparator();
+  addLog('success', 'SYS_LOG: ALIGNING_PROMPT', '✅ Answers submitted. Starting full build pipeline...', Date.now());
+
+  try {
+    await fetch(`${API_BASE}/api/build/${currentTaskId}/answers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ build_task_id: currentTaskId, answers }),
+    });
+  } catch (err) {
+    addLog('error', 'SYS_LOG: ERROR', `Failed to submit answers: ${err.message}`, Date.now());
+  }
+}
+
+function showDelivery(deploy) {
+  const panel = document.getElementById('delivery-panel');
+  const urlEl = document.getElementById('prod-url');
+  const ghEl = document.getElementById('github-url');
+  urlEl.href = deploy.production_url || '#';
+  urlEl.textContent = deploy.production_url || 'Deployment in progress...';
+  ghEl.href = deploy.github_repo_url || '#';
+  panel.classList.add('visible');
+  addSeparator();
+  addLog('success', 'SYS_LOG: DEPLOYING_PROD', `🎉 LIVE → ${deploy.production_url}`, Date.now());
+}
+
+function showEnvModal() {
+  document.getElementById('env-content').textContent = currentEnvMarkdown || '# No environment variables required.';
+  document.getElementById('env-modal').classList.add('open');
+}
+
+function closeEnvModal(e) {
+  if (e.target.id === 'env-modal') document.getElementById('env-modal').classList.remove('open');
+}
+
+async function downloadSource() {
+  if (!currentTaskId) return;
+  window.open(`${API_BASE}/api/build/${currentTaskId}/download`, '_blank');
+}
+
+function resetEngine() {
+  if (eventSource) eventSource.close();
+  currentTaskId = null;
+  logCount = 0;
+  buildStartTime = null;
+  currentEnvMarkdown = '';
+
+  document.getElementById('console-body').innerHTML = `
+    <div class="log-line" style="opacity:1;">
+      <span class="log-ts">00:00</span>
+      <span class="log-tag system">HEAVEN.AI ENGINE v2.0</span>
+      <span class="log-msg">Ready for new build. Enter your project brief.</span>
+    </div>`;
+  document.getElementById('delivery-panel').classList.remove('visible');
+  document.getElementById('questions-panel').classList.remove('visible');
+  document.getElementById('pricing-section').style.display = 'none';
+  document.getElementById('submit-btn').disabled = false;
+  document.getElementById('live-indicator').style.display = 'none';
+  document.getElementById('progress-bar').style.width = '0';
+  document.getElementById('status-text').textContent = 'Ready';
+  document.getElementById('stat-logs').textContent = '0';
+  document.getElementById('stat-files').textContent = '—';
+  document.getElementById('stat-loops').textContent = '0';
+  document.getElementById('stat-status').textContent = '—';
+  document.getElementById('stat-status').style.color = 'var(--green)';
+  document.querySelectorAll('.phase-item').forEach(el => {
+    el.className = 'phase-item pending';
+  });
+}
+</script>
+</body>
+</html>
