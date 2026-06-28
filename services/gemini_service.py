@@ -9,7 +9,7 @@ from typing import Any, Dict
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 SCOPING_PROMPT = """You are an elite Product Manager. Analyze a raw project idea and produce scoping analysis.
 Respond ONLY in valid JSON — no markdown:
