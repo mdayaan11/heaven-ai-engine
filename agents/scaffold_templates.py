@@ -54,9 +54,9 @@ def package_json(project_name: str) -> str:
                 "lint": "next lint",
             },
             "dependencies": {
-                "next": "15.1.8",
-                "react": "^19.0.0",
-                "react-dom": "^19.0.0",
+                "next": "15.5.16",
+                "react": "^19.2.6",
+                "react-dom": "^19.2.6",
                 "@prisma/client": "^6.0.0",
                 "next-auth": "^4.24.0",
             },
