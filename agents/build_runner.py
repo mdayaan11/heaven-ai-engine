@@ -17,6 +17,11 @@ from agents.scaffold_templates import (
     endpoint_to_route_path,
     is_valid_package_json,
     is_valid_route_module,
+    needs_auth,
+    auth_config_ts,
+    auth_ts,
+    auth_nextauth_route_ts,
+    middleware_ts,
     next_config_ts,
     package_json,
     route_handler,
@@ -37,6 +42,14 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
         return tsconfig_json()
     if path == "next.config.ts":
         return next_config_ts()
+    if path == "src/lib/auth.config.ts":
+        return auth_config_ts()
+    if path == "src/lib/auth.ts":
+        return auth_ts()
+    if path == "src/app/api/auth/[...nextauth]/route.ts":
+        return auth_nextauth_route_ts()
+    if path == "src/middleware.ts":
+        return middleware_ts()
     if path.endswith("/route.ts"):
         return route_handler(ep)
     return None
@@ -57,6 +70,14 @@ def _sanitize_generated_files(
             content = tsconfig_json()
         elif f.path == "next.config.ts":
             content = next_config_ts()
+        elif f.path == "src/lib/auth.config.ts":
+            content = auth_config_ts()
+        elif f.path == "src/lib/auth.ts":
+            content = auth_ts()
+        elif f.path == "src/app/api/auth/[...nextauth]/route.ts":
+            content = auth_nextauth_route_ts()
+        elif f.path == "src/middleware.ts":
+            content = middleware_ts()
         elif f.path.endswith("/route.ts") and not is_valid_route_module(content):
             content = route_handler(endpoints_by_route.get(f.path))
         sanitized.append(GeneratedFile(path=f.path, content=content, language=f.language))
@@ -180,15 +201,29 @@ NAMING RULE: All code variable names MUST exactly match database column names.
     route_files = [endpoint_to_route_path(ep.path) for ep in api_endpoints]
     endpoints_by_route = dict(zip(route_files, api_endpoints))
 
-    files_to_generate = [
+    # Only scaffold auth files when the project actually needs login/accounts.
+    # This avoids generating broken NextAuth/Edge Runtime code for sites
+    # (like a simple cafe website) that never needed auth in the first place.
+    auth_required = needs_auth(agreement.features) if is_nextjs else False
+
+    nextjs_files = [
         "package.json", "tsconfig.json", "next.config.ts",
-        "prisma/schema.prisma", "src/lib/db.ts", "src/lib/auth.ts",
+        "prisma/schema.prisma", "src/lib/db.ts",
         "src/types/index.ts",
         *route_files,
         "src/app/layout.tsx", "src/app/page.tsx",
         "src/app/globals.css", "src/components/Navbar.tsx",
-        "src/middleware.ts", ".env.example", "README.md",
-    ] if is_nextjs else [
+        ".env.example", "README.md",
+    ]
+    if auth_required:
+        nextjs_files += [
+            "src/lib/auth.config.ts",
+            "src/lib/auth.ts",
+            "src/app/api/auth/[...nextauth]/route.ts",
+            "src/middleware.ts",
+        ]
+
+    files_to_generate = nextjs_files if is_nextjs else [
         "requirements.txt", "main.py", "database.py",
         "models.py", "auth.py", "routes.py", ".env.example", "README.md",
     ]
