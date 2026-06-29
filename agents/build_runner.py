@@ -13,11 +13,54 @@ from models.schemas import (
     ScopingResult, FeatureAgreement, ArchitectureBlueprint,
     DatabaseTable, ApiEndpoint, GeneratedFile, SynthesisResult, DeploymentResult,
 )
+from agents.scaffold_templates import (
+    endpoint_to_route_path,
+    is_valid_package_json,
+    is_valid_route_module,
+    next_config_ts,
+    package_json,
+    route_handler,
+    tsconfig_json,
+)
 from services.gemini_service import GeminiService
 from services.e2b_service import SandboxOrchestrator
 from services.security_scanner import SecurityScannerService
 from services.github_service import GitHubService
 from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
+
+
+def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None) -> Optional[str]:
+    """Return hardcoded content for files that must never be LLM placeholders."""
+    if path == "package.json":
+        return package_json(project_name)
+    if path == "tsconfig.json":
+        return tsconfig_json()
+    if path == "next.config.ts":
+        return next_config_ts()
+    if path.endswith("/route.ts"):
+        return route_handler(ep)
+    return None
+
+
+def _sanitize_generated_files(
+    files: list[GeneratedFile],
+    project_name: str,
+    endpoints_by_route: dict[str, ApiEndpoint],
+) -> list[GeneratedFile]:
+    """Ensure scaffold files are valid before E2B build and GitHub push."""
+    sanitized: list[GeneratedFile] = []
+    for f in files:
+        content = f.content
+        if f.path == "package.json" and not is_valid_package_json(content):
+            content = package_json(project_name)
+        elif f.path == "tsconfig.json":
+            content = tsconfig_json()
+        elif f.path == "next.config.ts":
+            content = next_config_ts()
+        elif f.path.endswith("/route.ts") and not is_valid_route_module(content):
+            content = route_handler(endpoints_by_route.get(f.path))
+        sanitized.append(GeneratedFile(path=f.path, content=content, language=f.language))
+    return sanitized
 
 
 def _log(build: BuildState, tag: str, message: str, level: LogLevel = LogLevel.INFO) -> None:
@@ -133,12 +176,15 @@ API ENDPOINTS: {chr(10).join(f'{e.method} {e.path}' for e in arch.api_endpoints)
 NAMING RULE: All code variable names MUST exactly match database column names.
 """
 
+    api_endpoints = arch.api_endpoints[:6]
+    route_files = [endpoint_to_route_path(ep.path) for ep in api_endpoints]
+    endpoints_by_route = dict(zip(route_files, api_endpoints))
+
     files_to_generate = [
         "package.json", "tsconfig.json", "next.config.ts",
         "prisma/schema.prisma", "src/lib/db.ts", "src/lib/auth.ts",
         "src/types/index.ts",
-        *[f"src/app/api/{ep.path.strip('/').replace('/', '_')}/route.ts"
-          for ep in arch.api_endpoints[:6]],
+        *route_files,
         "src/app/layout.tsx", "src/app/page.tsx",
         "src/app/globals.css", "src/components/Navbar.tsx",
         "src/middleware.ts", ".env.example", "README.md",
@@ -152,6 +198,14 @@ NAMING RULE: All code variable names MUST exactly match database column names.
         try:
             _log(build, "SYS_LOG: SYNTHESIZING_CODE",
                  f"Writing {fp} ({i+1}/{len(files_to_generate)})...")
+            scaffold = _scaffold_content(
+                fp,
+                agreement.project_name,
+                endpoints_by_route.get(fp) if is_nextjs else None,
+            )
+            if scaffold is not None:
+                generated.append(GeneratedFile(path=fp, content=scaffold, language="typescript"))
+                continue
             raw = llm.generate_file(fp, blueprint_context, [f.model_dump() for f in generated])
             generated.append(GeneratedFile(
                 path=raw["path"], content=raw["content"],
@@ -160,6 +214,9 @@ NAMING RULE: All code variable names MUST exactly match database column names.
         except Exception as e:
             _log(build, "SYS_LOG: SYNTHESIZING_CODE",
                  f"⚠ Skipped {fp}: {str(e)[:80]}", LogLevel.WARNING)
+
+    if is_nextjs:
+        generated = _sanitize_generated_files(generated, agreement.project_name, endpoints_by_route)
 
     _log(build, "SYS_LOG: SYNTHESIZING_CODE",
          f"✅ {len(generated)} files generated. Injecting into E2B sandbox...", LogLevel.SUCCESS)
