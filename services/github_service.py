@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import base64
 import logging
+import time
+import uuid
 from typing import Any, Dict, List
 
 import httpx
@@ -33,26 +35,43 @@ class GitHubService:
         self.username = username
 
     def create_repo(self, repo_name: str, private: bool = False) -> Dict[str, Any]:
-        safe_name = repo_name.lower().replace(" ", "-")[:40]
+        # Every build run gets its own fresh repo, even if the project
+        # name is identical (e.g. "cafe website" run 50 times). Without
+        # this, every same-named run silently reused and piled commits
+        # onto ONE shared repo, leaving stale files from old/broken
+        # runs sitting alongside new ones forever (this was the actual
+        # cause of "old TODO placeholder" and "old wrong route path"
+        # errors resurfacing after fixes that had already worked).
+        base_slug = repo_name.lower().replace(" ", "-")[:30]
+        unique_suffix = uuid.uuid4().hex[:8]
+        safe_name = f"{base_slug}-{unique_suffix}"
+
         r = httpx.post(
             f"{self.BASE}/user/repos",
             headers=self.headers,
-            # auto_init=False: we create the first commit ourselves via
-            # the trees API below, so there's no initial README commit
-            # to race against.
             json={"name": safe_name, "private": private, "auto_init": False},
             timeout=30,
         )
-        if r.status_code not in (201, 422):
-            r.raise_for_status()
-        data = r.json()
-        if r.status_code == 422:
-            r2 = httpx.get(
-                f"{self.BASE}/repos/{self.username}/{safe_name}",
-                headers=self.headers, timeout=15,
+        if r.status_code == 201:
+            data = r.json()
+        elif r.status_code == 422:
+            # Extremely unlikely name collision even with the random
+            # suffix — retry once with a fresh suffix instead of ever
+            # silently reusing an existing repo.
+            unique_suffix = f"{int(time.time())}-{uuid.uuid4().hex[:6]}"
+            safe_name = f"{base_slug}-{unique_suffix}"
+            r2 = httpx.post(
+                f"{self.BASE}/user/repos",
+                headers=self.headers,
+                json={"name": safe_name, "private": private, "auto_init": False},
+                timeout=30,
             )
             r2.raise_for_status()
             data = r2.json()
+        else:
+            r.raise_for_status()
+            data = r.json()
+
         return {
             "html_url": data.get("html_url", ""),
             "clone_url": data.get("clone_url", ""),
