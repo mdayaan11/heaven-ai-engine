@@ -312,6 +312,14 @@ NAMING RULE: All code variable names MUST exactly match database column names.
     _log(build, "SYS_LOG: RUNNING_QA_TESTS",
          f"✅ Security scan done. {len(secrets)} secret(s) → .env", LogLevel.SUCCESS)
 
+    # ── DIAGNOSTIC (temporary) ────────────────
+    for f in sanitized:
+        if f.path == "src/app/layout.tsx":
+            preview = f.content[:80].replace("\n", "\\n")
+            _log(build, "SYS_LOG: DEBUG",
+                 f"🔍 layout.tsx content right before GitHub push (len={len(f.content)}): {preview}",
+                 LogLevel.WARNING)
+
     # ── GitHub Deploy ─────────────────────────
     build.current_phase = BuildPhase.DEPLOYMENT
     _log(build, "SYS_LOG: DEPLOYING_PROD",
