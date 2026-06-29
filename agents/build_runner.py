@@ -23,6 +23,9 @@ from agents.scaffold_templates import (
     auth_nextauth_route_ts,
     middleware_ts,
     next_config_ts,
+    layout_tsx,
+    page_tsx,
+    globals_css,
     package_json,
     route_handler,
     tsconfig_json,
@@ -42,6 +45,12 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
         return tsconfig_json()
     if path == "next.config.ts":
         return next_config_ts()
+    if path == "src/app/layout.tsx":
+        return layout_tsx(project_name)
+    if path == "src/app/page.tsx":
+        return page_tsx(project_name)
+    if path == "src/app/globals.css":
+        return globals_css()
     if path == "src/lib/auth.config.ts":
         return auth_config_ts()
     if path == "src/lib/auth.ts":
@@ -70,6 +79,12 @@ def _sanitize_generated_files(
             content = tsconfig_json()
         elif f.path == "next.config.ts":
             content = next_config_ts()
+        elif f.path == "src/app/layout.tsx" and not is_valid_route_module(content):
+            content = layout_tsx(project_name)
+        elif f.path == "src/app/page.tsx" and not is_valid_route_module(content):
+            content = page_tsx(project_name)
+        elif f.path == "src/app/globals.css" and not content.strip():
+            content = globals_css()
         elif f.path == "src/lib/auth.config.ts":
             content = auth_config_ts()
         elif f.path == "src/lib/auth.ts":
