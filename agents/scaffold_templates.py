@@ -164,3 +164,114 @@ def route_handler(ep: Optional[ApiEndpoint] = None) -> str:
 
 {body}
 """
+
+
+# ─────────────────────────────────────────────
+# Auth scaffolding (only used when needs_auth() is True)
+# ─────────────────────────────────────────────
+
+AUTH_KEYWORDS = (
+    "login", "log in", "sign in", "signin", "sign up", "signup",
+    "auth", "authentication", "account", "user account",
+    "register", "registration", "session", "password",
+)
+
+
+def needs_auth(features: list[str]) -> bool:
+    """Decide whether the project actually needs login/auth scaffolding."""
+    joined = " ".join(features).lower()
+    return any(keyword in joined for keyword in AUTH_KEYWORDS)
+
+
+def auth_config_ts() -> str:
+    """Edge-safe config: NO providers, NO bcrypt/db imports.
+    Safe to import from middleware.ts (runs in Edge Runtime)."""
+    return """import type { NextAuthOptions } from 'next-auth';
+
+// Edge-safe config only. Do NOT import providers or database
+// clients here — this file is imported by middleware.ts, which
+// runs in the Edge Runtime and cannot use Node.js APIs or
+// dynamic code evaluation (which next-auth providers rely on).
+export const authConfig: Partial<NextAuthOptions> = {
+  pages: {
+    signIn: '/login',
+  },
+  session: {
+    strategy: 'jwt',
+  },
+};
+"""
+
+
+def auth_ts() -> str:
+    """Full NextAuth setup with providers. Only imported from
+    Node.js runtime routes (e.g. app/api/auth/[...nextauth]/route.ts),
+    never from middleware.ts."""
+    return """import NextAuth from 'next-auth';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { authConfig } from './auth.config';
+
+export const authOptions = {
+  ...authConfig,
+  providers: [
+    CredentialsProvider({
+      name: 'Credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        // TODO: replace with real lookup against your database.
+        if (!credentials?.email || !credentials?.password) {
+          return null;
+        }
+        return { id: '1', email: credentials.email };
+      },
+    }),
+  ],
+};
+
+export default NextAuth(authOptions);
+"""
+
+
+def auth_nextauth_route_ts() -> str:
+    """app/api/auth/[...nextauth]/route.ts — Node runtime, safe to use full next-auth."""
+    return """import NextAuth from 'next-auth';
+import { authOptions } from '@/lib/auth';
+
+const handler = NextAuth(authOptions);
+
+export { handler as GET, handler as POST };
+"""
+
+
+def middleware_ts() -> str:
+    """Edge-safe middleware. Imports ONLY auth.config.ts (no providers,
+    no next-auth core eval-based code) to avoid the Edge Runtime
+    'Dynamic Code Evaluation' build error."""
+    return """import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+// Lightweight cookie-presence check only. Full session
+// verification happens in the Node runtime (API routes / pages),
+// not here, since middleware runs in the Edge Runtime and cannot
+// use next-auth's full provider stack.
+export function middleware(request: NextRequest) {
+  const sessionToken =
+    request.cookies.get('next-auth.session-token') ||
+    request.cookies.get('__Secure-next-auth.session-token');
+
+  const isProtectedRoute = request.nextUrl.pathname.startsWith('/dashboard');
+
+  if (isProtectedRoute && !sessionToken) {
+    return NextResponse.redirect(new URL('/login', request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/dashboard/:path*'],
+};
+"""
