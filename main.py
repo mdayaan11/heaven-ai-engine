@@ -36,14 +36,13 @@ app = FastAPI(
 
 ALLOWED_ORIGINS = os.environ.get(
     "ALLOWED_ORIGINS",
-    "https://heavenaii.netlify.app,http://localhost:3000"
+    "https://heavenaii.netlify.app,http://localhost:3000,http://localhost:8080"
 ).split(",")
 
-# FIX: Can't use allow_origins=["*"] with allow_credentials=True — use explicit origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
