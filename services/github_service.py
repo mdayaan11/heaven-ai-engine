@@ -49,7 +49,14 @@ class GitHubService:
         r = httpx.post(
             f"{self.BASE}/user/repos",
             headers=self.headers,
-            json={"name": safe_name, "private": private, "auto_init": False},
+            # auto_init=True: GitHub's Git Data API (blobs/trees) rejects
+            # writes against a truly empty repo with no initial commit/ref
+            # ("Git Repository is empty" 409). We need SOME initial commit
+            # to exist. This is safe now (unlike the old code) because we
+            # only ever make ONE atomic commit afterward in commit_files(),
+            # not 17 separate racing PUTs — commit_files() reads the real
+            # parent SHA from this initial commit and builds on top of it.
+            json={"name": safe_name, "private": private, "auto_init": True},
             timeout=30,
         )
         if r.status_code == 201:
@@ -63,7 +70,7 @@ class GitHubService:
             r2 = httpx.post(
                 f"{self.BASE}/user/repos",
                 headers=self.headers,
-                json={"name": safe_name, "private": private, "auto_init": False},
+                json={"name": safe_name, "private": private, "auto_init": True},
                 timeout=30,
             )
             r2.raise_for_status()
@@ -94,16 +101,21 @@ class GitHubService:
         """
         base_url = f"{self.BASE}/repos/{repo_full_name}"
 
-        # 1. Does the branch already have a commit? (it won't, since
-        #    create_repo() now uses auto_init=False)
+        # 1. Read the initial commit GitHub created via auto_init=True.
+        #    This can take a brief moment to land after create_repo()
+        #    returns, so retry a few times instead of assuming it's
+        #    instantly there (this is the actual race that bit us before).
         parent_sha = None
         base_tree_sha = None
-        ref_resp = httpx.get(f"{base_url}/git/ref/heads/{branch}", headers=self.headers, timeout=15)
-        if ref_resp.status_code == 200:
-            parent_sha = ref_resp.json()["object"]["sha"]
-            commit_resp = httpx.get(f"{base_url}/git/commits/{parent_sha}", headers=self.headers, timeout=15)
-            commit_resp.raise_for_status()
-            base_tree_sha = commit_resp.json()["tree"]["sha"]
+        for attempt in range(5):
+            ref_resp = httpx.get(f"{base_url}/git/ref/heads/{branch}", headers=self.headers, timeout=15)
+            if ref_resp.status_code == 200:
+                parent_sha = ref_resp.json()["object"]["sha"]
+                commit_resp = httpx.get(f"{base_url}/git/commits/{parent_sha}", headers=self.headers, timeout=15)
+                commit_resp.raise_for_status()
+                base_tree_sha = commit_resp.json()["tree"]["sha"]
+                break
+            time.sleep(1.5)
 
         # 2. Create a blob for every file's content.
         tree_items = []
