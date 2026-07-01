@@ -62,7 +62,17 @@ text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
         return self._parse_json(SCOPING_PROMPT, f"Project idea: {idea}", self._default_scoping(idea))
 
     def run_architecture(self, manifest: str, answers: Dict) -> Dict:
-        return self._parse_json(ARCHITECTURE_PROMPT, f"Project: {manifest}\nAnswers: {json.dumps(answers)}", self._default_architecture())
+        data = self._parse_json(ARCHITECTURE_PROMPT, f"Project: {manifest}\nAnswers: {json.dumps(answers)}", self._default_architecture())
+        
+        # INTERCEPTOR: Auto-fix Pydantic validation errors if Gemini still stubbornly returns lists
+        if isinstance(data, dict) and "api_endpoints" in data:
+            for endpoint in data["api_endpoints"]:
+                if isinstance(endpoint.get("response_schema"), list):
+                    endpoint["response_schema"] = {"data": endpoint["response_schema"]}
+                if isinstance(endpoint.get("request_body"), list):
+                    endpoint["request_body"] = {"data": endpoint["request_body"]}
+                    
+        return data
 
     def generate_file(self, path: str, context: str, existing: list) -> Dict:
         done = "\n".join(f"- {f['path']}" for f in existing[:10])
