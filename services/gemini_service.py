@@ -27,13 +27,10 @@ text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
                 return default
             raise
 
-    # ── Default fallbacks ──────────────────────────────────────────────────
     def _default_scoping(self, idea: str) -> Dict:
         return {
             "questions": [
-                {"question_id": "q1", "question_text": "What is the primary goal?", "options": ["Information only", "E-commerce", "SaaS platform"], "required": True},
-                {"question_id": "q2", "question_text": "Target audience?", "options": ["Consumer (B2C)", "Business (B2B)", "Internal tool"], "required": True},
-                {"question_id": "q3", "question_text": "Authentication needed?", "options": ["Yes — email/password", "Yes — social login", "No auth needed"], "required": True},
+                {"question_id": "q1", "question_text": "What is the primary goal?", "options": ["Information only", "E-commerce", "SaaS"], "required": True}
             ],
             "estimated_price_usd": 500.0,
             "complexity_score": 5,
@@ -47,21 +44,20 @@ text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
             "api_endpoints": [{"method": "GET", "path": "/api/health", "description": "Health check", "request_body": {}, "response_schema": {}, "status_codes": [200], "auth_required": False}],
             "tech_stack_manifest": "Next.js 15 + TypeScript + Tailwind",
             "folder_structure": "src/app/",
-            "env_variables_needed": ["DATABASE_URL", "NEXTAUTH_SECRET"],
+            "env_variables_needed": ["DATABASE_URL"],
         }
 
     def _default_agreement(self, idea: str) -> Dict:
         return {
             "project_name": idea[:40],
-            "tech_stack": "Next.js 15 + TypeScript + Prisma",
-            "features": ["User authentication", "Core UI", "API endpoints", "Database"],
-            "out_of_scope": ["Mobile app", "Advanced analytics"],
+            "tech_stack": "Next.js 15 + TypeScript",
+            "features": ["User authentication", "Core UI"],
+            "out_of_scope": ["Mobile app"],
             "price_usd": 500.0,
             "delivery_estimate": "10 min build",
             "manifest_xml": "<manifest><project>v1</project></manifest>",
         }
 
-    # ── Public API ──────────────────────────────────────────────────────────
     def run_scoping(self, idea: str) -> Dict:
         return self._parse_json(SCOPING_PROMPT, f"Project idea: {idea}", self._default_scoping(idea))
 
@@ -71,7 +67,7 @@ text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
     def generate_file(self, path: str, context: str, existing: list) -> Dict:
         done = "\n".join(f"- {f['path']}" for f in existing[:10])
         
-        # 🌟 REDIRECT NODE: If it's writing the content profile, make sure it matches our design schema
+        # Intercept content.json to stop frontend breaking
         if "content.json" in path:
             return self._parse_json(SYNTHESIS_PROMPT, f"Generate the design configuration details for: {context[:500]}", {"businessName": "Ayan Cafe", "tagline": "Premium Space", "heroDescription": "Built autonomously.", "themeMode": "dark", "accentGradients": "from-amber-500 to-orange-600", "features": []})
             
