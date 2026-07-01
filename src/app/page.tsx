@@ -1,5 +1,18 @@
 import React from 'react';
-import clientData from './content.json'; 
+
+// Fallback data structure to ensure compilation 
+// Your AI engine can either update this object directly or you can swap this back to an import in Vercel
+const clientData = {
+  businessName: "Heaven AI Hub",
+  tagline: "Autonomous Generation",
+  heroDescription: "Building the future of web deployment.",
+  themeMode: "dark",
+  accentGradients: "from-amber-500 to-orange-600",
+  features: [
+    { title: "Instant Deployment", desc: "Zero-configuration edge hosting." },
+    { title: "Dynamic Architecture", desc: "Bulletproof React compilation." }
+  ]
+};
 
 export default function HomePage() {
   return (
