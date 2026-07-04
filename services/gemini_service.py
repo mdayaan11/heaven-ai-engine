@@ -9,24 +9,52 @@ from typing import Any, Dict
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
-SCOPING_PROMPT = """You are an elite Product Manager. Analyze this project idea.
-Respond ONLY in valid JSON — no markdown, no code blocks, no extra text:
-{"questions":[{"question_id":"q1","question_text":"...","options":["A","B","C"],"required":true}],"estimated_price_usd":250.0,"complexity_score":5,"estimated_build_time_minutes":10,"feature_summary":"..."}"""
+SCOPING_PROMPT = """You are an elite Product Manager. Analyze this project idea and produce scoping questions.
+Respond ONLY in valid compact JSON — no markdown, no code blocks, no extra text:
+{"questions":[{"question_id":"q1","question_text":"...","options":["A","B","C"],"required":true}],"estimated_price_usd":500.0,"complexity_score":6,"estimated_build_time_minutes":12,"feature_summary":"..."}
+Generate 3-5 highly relevant questions specific to the project type."""
 
-ARCHITECTURE_PROMPT = """You are a Software Architect. Generate a technical blueprint.
-Keep all string values SHORT and simple — no multi-line strings, no SQL, no Prisma schemas.
-Respond ONLY in valid compact JSON — no markdown, no code blocks:
-{"database_tables":[{"table_name":"users","prisma_schema":"model User { id Int }","sql_schema":"CREATE TABLE users (id INT)"}],"api_endpoints":[{"method":"POST","path":"/api/auth","description":"Login endpoint","request_body":{},"response_schema":{},"status_codes":[200],"auth_required":false}],"tech_stack_manifest":"Next.js 15 + TypeScript","folder_structure":"src/app/page.tsx","env_variables_needed":["DATABASE_URL"]}"""
+ARCHITECTURE_PROMPT = """You are a Software Architect. Generate a minimal technical blueprint.
+Keep ALL string values SHORT (one line max). No SQL. No Prisma syntax in strings.
+Respond ONLY in valid compact JSON — no markdown:
+{"database_tables":[{"table_name":"users","prisma_schema":"model User { id Int @id @default(autoincrement()) email String @unique }","sql_schema":"users(id,email)"}],"api_endpoints":[{"method":"GET","path":"/api/health","description":"Health check","request_body":{},"response_schema":{},"status_codes":[200],"auth_required":false}],"tech_stack_manifest":"Next.js 15 + TypeScript + Tailwind CSS","folder_structure":"src/app/","env_variables_needed":["DATABASE_URL"]}"""
 
-SYNTHESIS_PROMPT = """You are a Senior Full-Stack Developer. Write complete production code.
-Respond ONLY in valid JSON — no markdown, no code blocks:
-{"path":"src/app/page.tsx","content":"...complete file content...","language":"typescript"}"""
+SYNTHESIS_PROMPT = """You are a world-class Senior Full-Stack Developer and UI/UX Designer.
+Generate a COMPLETE, PRODUCTION-READY file. Rules:
+- NO placeholders. NO TODOs. NO "// implement here". Write REAL working code.
+- Use Tailwind CSS classes for ALL styling. Make it VISUALLY STUNNING.
+- Use real colors (gradients, dark themes). Real content. Real functionality.
+- For page.tsx files: Create a beautiful, modern UI with hero sections, cards, animations.
+- For 3D projects: Use dynamic imports with ssr:false for three.js components.
+- For components: Make them interactive with hover effects, transitions.
+- Import only packages that are in the project's package.json.
+
+Respond ONLY in valid JSON — no markdown:
+{"path":"src/app/page.tsx","content":"...COMPLETE FILE CONTENT...","language":"typescript"}"""
 
 AGREEMENT_PROMPT = """You are a Product Manager. Generate a Feature Agreement.
-Respond ONLY in valid compact JSON — no markdown, no code blocks:
-{"project_name":"...","tech_stack":"Next.js 15 + TypeScript","features":["feature1","feature2"],"out_of_scope":["item1"],"price_usd":250.0,"delivery_estimate":"10 min","manifest_xml":"<manifest>v1</manifest>"}"""
+Respond ONLY in valid compact JSON — no markdown:
+{"project_name":"...","tech_stack":"Next.js 15 + TypeScript + Tailwind CSS","features":["feature1","feature2"],"out_of_scope":["item1"],"price_usd":500.0,"delivery_estimate":"12 min","manifest_xml":"<manifest><v>1</v></manifest>"}"""
+
+PAGE_QUALITY_PROMPT = """You are a world-class UI/UX Developer. Generate src/app/page.tsx for this project.
+
+REQUIREMENTS:
+1. Beautiful dark theme with gradients (bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900)
+2. Real content specific to the project (not placeholder text)
+3. Hero section with project name + tagline
+4. Feature showcase cards with icons (use lucide-react)
+5. Smooth hover effects (hover:scale-105, transition-all duration-300)
+6. Professional typography (font-bold, tracking-tight, text-white)
+7. Call-to-action buttons with gradient backgrounds
+8. For 3D projects: wrap THREE.js components in dynamic() with ssr:false
+
+DO NOT use: placeholder text, grey boxes, Lorem ipsum, "Coming Soon", white backgrounds.
+DO NOT import packages not in package.json.
+
+Respond ONLY in valid JSON:
+{"path":"src/app/page.tsx","content":"COMPLETE_CODE","language":"typescript"}"""
 
 
 class GeminiService:
@@ -41,39 +69,35 @@ class GeminiService:
             params={"key": self.api_key},
             json={
                 "contents": [{"parts": [{"text": f"{system}\n\n---\n\n{user}"}], "role": "user"}],
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 8192},
+                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
             },
         )
         resp.raise_for_status()
         return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
 
     def _fix_json(self, text: str) -> str:
-        """Try to repair common JSON issues."""
-        # Remove markdown code blocks
         text = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.MULTILINE)
         text = re.sub(r"\s*```\s*$", "", text.strip(), flags=re.MULTILINE)
         text = text.strip()
-        # Extract first JSON object or array
         match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
         if match:
             text = match.group(1)
-        # Remove trailing commas before } or ]
+        # Fix trailing commas
         text = re.sub(r",\s*([\}\]])", r"\1", text)
-        # Fix single quotes (not in strings)
         return text
 
     def _parse_json(self, system: str, user: str, default: Dict = None) -> Dict[str, Any]:
+        raw = ""
+        cleaned = ""
         try:
             raw = self._call(system, user)
             cleaned = self._fix_json(raw)
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
-            # Try progressively more aggressive fixes
+            # Retry asking Gemini to fix its own JSON
             try:
-                raw2 = self._call(
-                    "Fix this broken JSON and return ONLY valid JSON, nothing else:",
-                    f"Error: {str(e)[:100]}\nJSON: {cleaned[:2000]}"
-                )
+                fix_prompt = f"Return ONLY valid JSON, no markdown. Fix this broken JSON:\n{cleaned[:3000]}"
+                raw2 = self._call("You fix broken JSON. Return ONLY the fixed JSON object, nothing else.", fix_prompt)
                 return json.loads(self._fix_json(raw2))
             except Exception:
                 if default is not None:
@@ -88,9 +112,9 @@ class GeminiService:
     def _default_scoping(self, idea: str) -> Dict:
         return {
             "questions": [
-                {"question_id": "q1", "question_text": "What is the primary goal?", "options": ["Information only", "E-commerce", "SaaS platform"], "required": True},
-                {"question_id": "q2", "question_text": "Target audience?", "options": ["Consumer (B2C)", "Business (B2B)", "Internal tool"], "required": True},
-                {"question_id": "q3", "question_text": "Authentication needed?", "options": ["Yes — email/password", "Yes — social login", "No auth needed"], "required": True},
+                {"question_id": "q1", "question_text": "What is the primary goal?", "options": ["Showcase/Portfolio", "E-commerce", "SaaS App", "Information site"], "required": True},
+                {"question_id": "q2", "question_text": "Color theme preference?", "options": ["Dark (modern/sleek)", "Light (clean/minimal)", "Colorful/Vibrant"], "required": True},
+                {"question_id": "q3", "question_text": "Key feature priority?", "options": ["Visual design", "User auth", "Payment system", "Content management"], "required": True},
             ],
             "estimated_price_usd": 500.0,
             "complexity_score": 5,
@@ -100,9 +124,9 @@ class GeminiService:
 
     def _default_architecture(self) -> Dict:
         return {
-            "database_tables": [{"table_name": "users", "prisma_schema": "model User { id Int @id }", "sql_schema": "CREATE TABLE users (id INT PRIMARY KEY)"}],
+            "database_tables": [{"table_name": "users", "prisma_schema": "model User { id Int @id }", "sql_schema": "users(id,email)"}],
             "api_endpoints": [{"method": "GET", "path": "/api/health", "description": "Health check", "request_body": {}, "response_schema": {}, "status_codes": [200], "auth_required": False}],
-            "tech_stack_manifest": "Next.js 15 + TypeScript + Tailwind",
+            "tech_stack_manifest": "Next.js 15 + TypeScript + Tailwind CSS",
             "folder_structure": "src/app/",
             "env_variables_needed": ["DATABASE_URL", "NEXTAUTH_SECRET"],
         }
@@ -110,11 +134,11 @@ class GeminiService:
     def _default_agreement(self, idea: str) -> Dict:
         return {
             "project_name": idea[:40],
-            "tech_stack": "Next.js 15 + TypeScript + Prisma",
-            "features": ["User authentication", "Core UI", "API endpoints", "Database"],
+            "tech_stack": "Next.js 15 + TypeScript + Tailwind CSS",
+            "features": ["Beautiful UI", "User authentication", "Core functionality", "Responsive design"],
             "out_of_scope": ["Mobile app", "Advanced analytics"],
             "price_usd": 500.0,
-            "delivery_estimate": "10 min build",
+            "delivery_estimate": "12 min build",
             "manifest_xml": "<manifest><project>v1</project></manifest>",
         }
 
@@ -123,17 +147,54 @@ class GeminiService:
         return self._parse_json(SCOPING_PROMPT, f"Project idea: {idea}", self._default_scoping(idea))
 
     def run_architecture(self, manifest: str, answers: Dict) -> Dict:
-        return self._parse_json(ARCHITECTURE_PROMPT, f"Project: {manifest}\nAnswers: {json.dumps(answers)}", self._default_architecture())
+        raw = self._parse_json(
+            ARCHITECTURE_PROMPT,
+            f"Project: {manifest[:500]}\nAnswers: {json.dumps(answers)}",
+            self._default_architecture()
+        )
+        # Normalize api_endpoints field names to avoid Pydantic conflicts
+        endpoints = raw.get("api_endpoints", [])
+        if isinstance(endpoints, dict):
+            endpoints = list(endpoints.values())
+        normalized = []
+        for ep in endpoints:
+            if not isinstance(ep, dict):
+                continue
+            n = dict(ep)
+            # Rename alternative field names Gemini sometimes uses
+            for alt in ("api_path", "endpoint", "route", "url"):
+                if alt in n and "path" not in n:
+                    n["path"] = n.pop(alt)
+            for alt in ("api_description", "desc", "summary"):
+                if alt in n and "description" not in n:
+                    n["description"] = n.pop(alt)
+            normalized.append(n)
+        raw["api_endpoints"] = normalized
+        return raw
 
     def generate_file(self, path: str, context: str, existing: list) -> Dict:
         done = "\n".join(f"- {f['path']}" for f in existing[:10])
-        return self._parse_json(SYNTHESIS_PROMPT, f"Generate: {path}\nProject: {context[:500]}\nDone: {done}", {"path": path, "content": "// TODO: implement", "language": "typescript"})
+        # Use enhanced prompt for main page
+        prompt = PAGE_QUALITY_PROMPT if path in ("src/app/page.tsx", "app/page.tsx") else SYNTHESIS_PROMPT
+        return self._parse_json(
+            prompt,
+            f"Generate: {path}\nProject context:\n{context[:1500]}\nFiles already done:\n{done}",
+            {"path": path, "content": f"// Auto-generated: {path}\nexport default function Component() {{ return <div>Loading...</div>; }}", "language": "typescript"}
+        )
 
     def self_correct(self, error: str, buggy: Dict) -> Dict:
-        return self._parse_json("Fix the build error. Return JSON only: {\"path\":\"...\",\"content\":\"...\",\"language\":\"...\"}", f"File: {buggy['path']}\nContent:\n{buggy.get('content','')[:1500]}\nError:\n{error[:500]}", buggy)
+        return self._parse_json(
+            "Fix the TypeScript/build error. Return ONLY valid JSON: {\"path\":\"...\",\"content\":\"...\",\"language\":\"...\"}",
+            f"File: {buggy['path']}\nError:\n{error[:600]}\nBuggy content:\n{buggy.get('content','')[:1500]}",
+            buggy
+        )
 
     def generate_feature_agreement(self, idea: str, scoping: Dict, answers: Dict) -> Dict:
-        return self._parse_json(AGREEMENT_PROMPT, f"Project: {idea}\nScoping: {json.dumps(scoping)[:500]}\nAnswers: {json.dumps(answers)}", self._default_agreement(idea))
+        return self._parse_json(
+            AGREEMENT_PROMPT,
+            f"Project: {idea}\nScoping: {json.dumps(scoping)[:400]}\nAnswers: {json.dumps(answers)}",
+            self._default_agreement(idea)
+        )
 
     def __del__(self):
         try:

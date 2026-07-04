@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import time
 import threading
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 from models.schemas import (
     BuildPhase, BuildState, LogEntry, LogLevel,
     ScopingResult, FeatureAgreement, ArchitectureBlueprint,
@@ -15,13 +15,17 @@ from models.schemas import (
 )
 from agents.scaffold_templates import (
     auth_ts,
+    detect_imports,
     endpoint_to_route_path,
+    globals_css,
     is_valid_package_json,
     is_valid_route_module,
     middleware_ts,
     next_config_ts,
     package_json,
+    postcss_config,
     route_handler,
+    tailwind_config,
     tsconfig_json,
 )
 from services.gemini_service import GeminiService
@@ -34,18 +38,47 @@ from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
 def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None) -> Optional[str]:
     """Return hardcoded content for files that must never be LLM placeholders."""
     if path == "package.json":
-        return package_json(project_name)
+        return None  # Built later with auto-detected deps
     if path == "tsconfig.json":
         return tsconfig_json()
-    if path == "next.config.ts":
+    if path == "next.config.ts" or path == "next.config.js":
         return next_config_ts()
-    if path == "src/middleware.ts" or path == "middleware.ts":
-        return middleware_ts()  # Edge-safe — no next-auth import
-    if path == "src/lib/auth.ts" or path == "lib/auth.ts":
-        return auth_ts()        # Correct next-auth v5 setup
+    if path in ("src/middleware.ts", "middleware.ts"):
+        return middleware_ts()
+    if path in ("src/lib/auth.ts", "lib/auth.ts"):
+        return auth_ts()
+    if path in ("tailwind.config.ts", "tailwind.config.js"):
+        return tailwind_config()
+    if path in ("postcss.config.js", "postcss.config.mjs"):
+        return postcss_config()
+    if path in ("src/app/globals.css", "app/globals.css"):
+        return globals_css()
     if path.endswith("/route.ts"):
         return route_handler(ep)
     return None
+
+
+def _inject_package_json(files: list, project_name: str) -> list:
+    """Auto-detect all npm imports and build a complete package.json."""
+    extra_deps, extra_dev = detect_imports(files)
+    pkg_content = package_json(project_name, extra_deps, extra_dev)
+    # Replace or add package.json
+    result = [f for f in files if (f.path if hasattr(f, 'path') else f.get('path')) != 'package.json']
+    result.insert(0, GeneratedFile(path='package.json', content=pkg_content, language='json'))
+    return result
+
+
+def _ensure_tailwind_files(files: list) -> list:
+    """Make sure tailwind config files exist so CSS builds correctly."""
+    paths = {(f.path if hasattr(f, 'path') else f.get('path', '')) for f in files}
+    extras = []
+    if 'tailwind.config.ts' not in paths:
+        extras.append(GeneratedFile(path='tailwind.config.ts', content=tailwind_config(), language='typescript'))
+    if 'postcss.config.js' not in paths:
+        extras.append(GeneratedFile(path='postcss.config.js', content=postcss_config(), language='javascript'))
+    if 'src/app/globals.css' not in paths and 'app/globals.css' not in paths:
+        extras.append(GeneratedFile(path='src/app/globals.css', content=globals_css(), language='css'))
+    return files + extras
 
 
 def _sanitize_generated_files(
@@ -61,7 +94,7 @@ def _sanitize_generated_files(
             content = package_json(project_name)
         elif f.path == "tsconfig.json":
             content = tsconfig_json()
-        elif f.path == "next.config.ts":
+        elif f.path in ("next.config.ts", "next.config.js"):
             content = next_config_ts()
         elif f.path.endswith("/route.ts") and not is_valid_route_module(content):
             content = route_handler(endpoints_by_route.get(f.path))
@@ -269,6 +302,9 @@ NAMING RULE: All code variable names MUST exactly match database column names.
                  f"⚠ Skipped {fp}: {str(e)[:80]}", LogLevel.WARNING)
 
     if is_nextjs:
+        # Auto-detect imports → inject into package.json + ensure Tailwind files
+        generated = _inject_package_json(generated, agreement.project_name)
+        generated = _ensure_tailwind_files(generated)
         generated = _sanitize_generated_files(generated, agreement.project_name, endpoints_by_route)
 
     _log(build, "SYS_LOG: SYNTHESIZING_CODE",
