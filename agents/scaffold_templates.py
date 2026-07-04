@@ -291,6 +291,75 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 """
 
 
+def db_ts() -> str:
+    """Prisma client singleton — always valid, never JSX."""
+    return """import { PrismaClient } from '@prisma/client';
+
+declare global {
+  // eslint-disable-next-line no-var
+  var prisma: PrismaClient | undefined;
+}
+
+const prisma = global.prisma ?? new PrismaClient();
+
+if (process.env.NODE_ENV !== 'production') {
+  global.prisma = prisma;
+}
+
+export default prisma;
+"""
+
+
+def utils_ts() -> str:
+    """Shared utility helpers — always valid TypeScript."""
+    return """import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+export function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+export function formatDate(date: Date | string): string {
+  return new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+export function formatCurrency(amount: number, currency = 'USD'): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(amount);
+}
+
+export function slugify(text: string): string {
+  return text.toLowerCase().replace(/[^\w\s-]/g, '').replace(/[\s_-]+/g, '-').replace(/^-+|-+$/g, '');
+}
+"""
+
+
+def prisma_schema(tables: list = None) -> str:
+    """Valid Prisma schema — always correct syntax."""
+    base = """// This is your Prisma schema file
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+"""
+    return base
+
+
 def route_handler(ep: Optional[ApiEndpoint] = None) -> str:
     path = ep.path if ep else "/api/health"
     method = (ep.method if ep else "GET").upper()

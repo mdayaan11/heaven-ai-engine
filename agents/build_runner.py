@@ -15,6 +15,7 @@ from models.schemas import (
 )
 from agents.scaffold_templates import (
     auth_ts,
+    db_ts,
     detect_imports,
     endpoint_to_route_path,
     globals_css,
@@ -24,9 +25,11 @@ from agents.scaffold_templates import (
     next_config_ts,
     package_json,
     postcss_config,
+    prisma_schema,
     route_handler,
     tailwind_config,
     tsconfig_json,
+    utils_ts,
 )
 from services.gemini_service import GeminiService
 from services.e2b_service import SandboxOrchestrator
@@ -41,12 +44,18 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
         return None  # Built later with auto-detected deps
     if path == "tsconfig.json":
         return tsconfig_json()
-    if path == "next.config.ts" or path == "next.config.js":
+    if path in ("next.config.ts", "next.config.js"):
         return next_config_ts()
     if path in ("src/middleware.ts", "middleware.ts"):
         return middleware_ts()
     if path in ("src/lib/auth.ts", "lib/auth.ts"):
         return auth_ts()
+    if path in ("src/lib/db.ts", "lib/db.ts", "src/lib/prisma.ts"):
+        return db_ts()
+    if path in ("src/lib/utils.ts", "lib/utils.ts", "src/utils/index.ts"):
+        return utils_ts()
+    if path in ("prisma/schema.prisma", "schema.prisma"):
+        return prisma_schema()
     if path in ("tailwind.config.ts", "tailwind.config.js"):
         return tailwind_config()
     if path in ("postcss.config.js", "postcss.config.mjs"):

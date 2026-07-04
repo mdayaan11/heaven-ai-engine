@@ -176,10 +176,25 @@ class GeminiService:
         done = "\n".join(f"- {f['path']}" for f in existing[:10])
         # Use enhanced prompt for main page
         prompt = PAGE_QUALITY_PROMPT if path in ("src/app/page.tsx", "app/page.tsx") else SYNTHESIS_PROMPT
+        # Smart fallback based on file type
+        is_tsx = path.endswith(".tsx")
+        is_ts = path.endswith(".ts") and not is_tsx
+        is_css = path.endswith(".css")
+        is_prisma = path.endswith(".prisma")
+        if is_tsx:
+            fallback_content = "export default function Component() { return <div className=\"p-8 text-white\">Loading...</div>; }"
+        elif is_ts:
+            fallback_content = "// auto-generated\nexport {};"
+        elif is_css:
+            fallback_content = "/* auto-generated */"
+        elif is_prisma:
+            fallback_content = "datasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\ngenerator client {\n  provider = \"prisma-client-js\"\n}"
+        else:
+            fallback_content = f"// auto-generated: {path}"
         return self._parse_json(
             prompt,
             f"Generate: {path}\nProject context:\n{context[:1500]}\nFiles already done:\n{done}",
-            {"path": path, "content": f"// Auto-generated: {path}\nexport default function Component() {{ return <div>Loading...</div>; }}", "language": "typescript"}
+            {"path": path, "content": fallback_content, "language": "typescript"}
         )
 
     def self_correct(self, error: str, buggy: Dict) -> Dict:
