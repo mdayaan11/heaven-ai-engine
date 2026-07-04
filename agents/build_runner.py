@@ -14,9 +14,11 @@ from models.schemas import (
     DatabaseTable, ApiEndpoint, GeneratedFile, SynthesisResult, DeploymentResult,
 )
 from agents.scaffold_templates import (
+    auth_ts,
     endpoint_to_route_path,
     is_valid_package_json,
     is_valid_route_module,
+    middleware_ts,
     next_config_ts,
     package_json,
     route_handler,
@@ -37,6 +39,10 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
         return tsconfig_json()
     if path == "next.config.ts":
         return next_config_ts()
+    if path == "src/middleware.ts" or path == "middleware.ts":
+        return middleware_ts()  # Edge-safe — no next-auth import
+    if path == "src/lib/auth.ts" or path == "lib/auth.ts":
+        return auth_ts()        # Correct next-auth v5 setup
     if path.endswith("/route.ts"):
         return route_handler(ep)
     return None
@@ -71,6 +77,48 @@ def _log(build: BuildState, tag: str, message: str, level: LogLevel = LogLevel.I
     build.logs.append(entry)
     push_log(build.task_id, entry.model_dump())
     set_build_state(build.task_id, build.model_dump())
+
+
+# ─────────────────────────────────────────────
+# Pydantic-safe model builders
+# (Gemini sometimes returns extra/renamed fields — filter them out)
+# ─────────────────────────────────────────────
+_DB_TABLE_FIELDS = {"table_name", "prisma_schema", "sql_schema"}
+_ENDPOINT_FIELDS = {"method", "path", "description", "request_body",
+                    "response_schema", "status_codes", "auth_required"}
+
+
+def _safe_db_table(raw: Any) -> DatabaseTable:
+    if not isinstance(raw, dict):
+        return DatabaseTable(table_name="table", prisma_schema="", sql_schema="")
+    filtered = {k: v for k, v in raw.items() if k in _DB_TABLE_FIELDS}
+    filtered.setdefault("table_name", "table")
+    filtered.setdefault("prisma_schema", "")
+    filtered.setdefault("sql_schema", "")
+    return DatabaseTable(**filtered)
+
+
+def _safe_endpoint(raw: Any) -> ApiEndpoint:
+    if not isinstance(raw, dict):
+        return ApiEndpoint(method="GET", path="/api/health", description="health")
+    d = {k: v for k, v in raw.items() if k in _ENDPOINT_FIELDS}
+    # Rename if Gemini used alternative field names
+    if "api_path" in raw and "path" not in d:
+        d["path"] = raw["api_path"]
+    if "api_description" in raw and "description" not in d:
+        d["description"] = raw["api_description"]
+    if "endpoint" in raw and "path" not in d:
+        d["path"] = raw["endpoint"]
+    if "route" in raw and "path" not in d:
+        d["path"] = raw["route"]
+    d.setdefault("method", "GET")
+    d.setdefault("path", "/api/endpoint")
+    d.setdefault("description", "")
+    d.setdefault("request_body", {})
+    d.setdefault("response_schema", {})
+    d.setdefault("status_codes", [200])
+    d.setdefault("auth_required", False)
+    return ApiEndpoint(**d)
 
 
 # ─────────────────────────────────────────────
@@ -141,9 +189,14 @@ def run_full_pipeline(build: BuildState) -> None:
          "Building secure database relational schemas...", LogLevel.SYSTEM)
     try:
         raw = llm.run_architecture(build.feature_agreement.manifest_xml, build.scoping_answers or {})
+        tables_raw = raw.get("database_tables", [])
+        endpoints_raw = raw.get("api_endpoints", [])
+        # Ensure both are lists (Gemini sometimes returns a dict)
+        if isinstance(tables_raw, dict): tables_raw = list(tables_raw.values())
+        if isinstance(endpoints_raw, dict): endpoints_raw = list(endpoints_raw.values())
         build.architecture = ArchitectureBlueprint(
-            database_tables=[DatabaseTable(**t) for t in raw.get("database_tables", [])],
-            api_endpoints=[ApiEndpoint(**e) for e in raw.get("api_endpoints", [])],
+            database_tables=[_safe_db_table(t) for t in tables_raw],
+            api_endpoints=[_safe_endpoint(e) for e in endpoints_raw],
             tech_stack_manifest=raw.get("tech_stack_manifest", ""),
             folder_structure=raw.get("folder_structure", ""),
             env_variables_needed=raw.get("env_variables_needed", []),

@@ -8,6 +8,51 @@ from typing import Optional
 from models.schemas import ApiEndpoint
 
 
+def middleware_ts() -> str:
+    """Edge-safe middleware — no next-auth import to avoid eval() crash."""
+    return """import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+export function middleware(request: NextRequest) {
+  // Add auth checks here if needed — keep this file edge-runtime safe
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/health).*)'],
+};
+"""
+
+
+def auth_ts() -> str:
+    """Auth config that works with Next.js App Router (nodejs runtime only)."""
+    return """// auth.ts — server-side only, do NOT import in middleware
+import NextAuth from 'next-auth';
+import CredentialsProvider from 'next-auth/providers/credentials';
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  providers: [
+    CredentialsProvider({
+      name: 'Credentials',
+      credentials: {
+        email: { label: 'Email', type: 'email' },
+        password: { label: 'Password', type: 'password' },
+      },
+      async authorize(credentials) {
+        // TODO: Replace with real DB lookup
+        if (credentials?.email && credentials?.password) {
+          return { id: '1', email: credentials.email as string, name: 'User' };
+        }
+        return null;
+      },
+    }),
+  ],
+  pages: { signIn: '/login' },
+  session: { strategy: 'jwt' },
+});
+"""
+
+
 def endpoint_to_route_path(ep_path: str) -> str:
     """Map /api/health -> src/app/api/health/route.ts (Next.js App Router)."""
     segments = ep_path.strip("/").split("/")
