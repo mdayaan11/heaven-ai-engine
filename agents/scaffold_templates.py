@@ -120,7 +120,7 @@ def detect_imports(files: list) -> Dict[str, str]:
 def package_json(project_name: str, extra_deps: Dict[str, str] = None,
                  extra_dev: Dict[str, str] = None) -> str:
     deps = {
-        "next": "15.1.0",
+        "next": "15.3.3",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "@prisma/client": "^6.0.0",
@@ -137,7 +137,7 @@ def package_json(project_name: str, extra_deps: Dict[str, str] = None,
         "typescript": "^5.7.0",
         "prisma": "^6.0.0",
         "eslint": "^9.0.0",
-        "eslint-config-next": "15.1.0",
+        "eslint-config-next": "15.3.3",
         "tailwindcss": "^3.4.17",
         "autoprefixer": "^10.4.20",
         "postcss": "^8.4.49",
