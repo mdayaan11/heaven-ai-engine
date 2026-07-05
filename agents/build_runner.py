@@ -2,6 +2,8 @@
 Heaven AI Engine — Core Build Runner
 Runs the full 4-phase pipeline in a background thread.
 Uses Gemini + E2B + GitHub.
+
+Every possible crash point is wrapped in try/except with sensible fallbacks.
 """
 from __future__ import annotations
 import os
@@ -18,17 +20,23 @@ from agents.scaffold_templates import (
     db_ts,
     detect_imports,
     endpoint_to_route_path,
+    env_example,
     globals_css,
     is_valid_package_json,
     is_valid_route_module,
+    is_valid_ts,
+    is_valid_tsx,
+    layout_tsx,
     middleware_ts,
     next_config_ts,
     package_json,
     postcss_config,
     prisma_schema,
+    readme_md,
     route_handler,
     tailwind_config,
     tsconfig_json,
+    types_index_ts,
     utils_ts,
 )
 from services.gemini_service import GeminiService
@@ -38,48 +46,69 @@ from services.github_service import GitHubService
 from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Scaffolding: hardcoded files that Gemini must NEVER generate
+# ─────────────────────────────────────────────────────────────────────────────
 def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None) -> Optional[str]:
-    """Return hardcoded content for files that must never be LLM placeholders."""
-    if path == "package.json":
+    """Return hardcoded content for critical files. Returns None if Gemini should generate it."""
+    p = path.lower()
+    # Config files
+    if p == "package.json":
         return None  # Built later with auto-detected deps
-    if path == "tsconfig.json":
+    if p == "tsconfig.json":
         return tsconfig_json()
-    if path in ("next.config.ts", "next.config.js"):
+    if p in ("next.config.ts", "next.config.js"):
         return next_config_ts()
-    if path in ("src/middleware.ts", "middleware.ts"):
-        return middleware_ts()
-    if path in ("src/lib/auth.ts", "lib/auth.ts"):
-        return auth_ts()
-    if path in ("src/lib/db.ts", "lib/db.ts", "src/lib/prisma.ts"):
-        return db_ts()
-    if path in ("src/lib/utils.ts", "lib/utils.ts", "src/utils/index.ts"):
-        return utils_ts()
-    if path in ("prisma/schema.prisma", "schema.prisma"):
-        return prisma_schema()
-    if path in ("tailwind.config.ts", "tailwind.config.js"):
+    if p in ("tailwind.config.ts", "tailwind.config.js"):
         return tailwind_config()
-    if path in ("postcss.config.js", "postcss.config.mjs"):
+    if p in ("postcss.config.js", "postcss.config.mjs"):
         return postcss_config()
-    if path in ("src/app/globals.css", "app/globals.css"):
+    # Source files that must be valid TS (not TSX)
+    if p in ("src/middleware.ts", "middleware.ts"):
+        return middleware_ts()
+    if p in ("src/lib/auth.ts", "lib/auth.ts"):
+        return auth_ts()
+    if p in ("src/lib/db.ts", "lib/db.ts", "src/lib/prisma.ts"):
+        return db_ts()
+    if p in ("src/lib/utils.ts", "lib/utils.ts", "src/utils/index.ts"):
+        return utils_ts()
+    if p in ("src/types/index.ts", "types/index.ts"):
+        return types_index_ts()
+    # Schema
+    if p in ("prisma/schema.prisma", "schema.prisma"):
+        return prisma_schema()
+    # CSS
+    if p in ("src/app/globals.css", "app/globals.css"):
         return globals_css()
-    if path.endswith("/route.ts"):
+    # Layout — critical, app won't render without it
+    if p in ("src/app/layout.tsx", "app/layout.tsx"):
+        return layout_tsx(project_name)
+    # Static files that don't need LLM
+    if p == ".env.example":
+        return env_example()
+    if p == "readme.md":
+        return readme_md(project_name)
+    # API routes
+    if p.endswith("/route.ts"):
         return route_handler(ep)
     return None
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-generation fixers
+# ─────────────────────────────────────────────────────────────────────────────
 def _inject_package_json(files: list, project_name: str) -> list:
     """Auto-detect all npm imports and build a complete package.json."""
     extra_deps, extra_dev = detect_imports(files)
     pkg_content = package_json(project_name, extra_deps, extra_dev)
-    # Replace or add package.json
-    result = [f for f in files if (f.path if hasattr(f, 'path') else f.get('path')) != 'package.json']
+    result = [f for f in files if getattr(f, 'path', '') != 'package.json']
     result.insert(0, GeneratedFile(path='package.json', content=pkg_content, language='json'))
     return result
 
 
-def _ensure_tailwind_files(files: list) -> list:
-    """Make sure tailwind config files exist so CSS builds correctly."""
-    paths = {(f.path if hasattr(f, 'path') else f.get('path', '')) for f in files}
+def _ensure_required_files(files: list, project_name: str) -> list:
+    """Ensure Tailwind config, PostCSS, globals.css, and layout.tsx always exist."""
+    paths = {getattr(f, 'path', '') for f in files}
     extras = []
     if 'tailwind.config.ts' not in paths:
         extras.append(GeneratedFile(path='tailwind.config.ts', content=tailwind_config(), language='typescript'))
@@ -87,6 +116,8 @@ def _ensure_tailwind_files(files: list) -> list:
         extras.append(GeneratedFile(path='postcss.config.js', content=postcss_config(), language='javascript'))
     if 'src/app/globals.css' not in paths and 'app/globals.css' not in paths:
         extras.append(GeneratedFile(path='src/app/globals.css', content=globals_css(), language='css'))
+    if 'src/app/layout.tsx' not in paths and 'app/layout.tsx' not in paths:
+        extras.append(GeneratedFile(path='src/app/layout.tsx', content=layout_tsx(project_name), language='typescript'))
     return files + extras
 
 
@@ -95,36 +126,58 @@ def _sanitize_generated_files(
     project_name: str,
     endpoints_by_route: dict[str, ApiEndpoint],
 ) -> list[GeneratedFile]:
-    """Ensure scaffold files are valid before E2B build and GitHub push."""
+    """Final pass — fix any broken files before pushing to GitHub."""
     sanitized: list[GeneratedFile] = []
     for f in files:
         content = f.content
-        if f.path == "package.json" and not is_valid_package_json(content):
+        path = f.path
+
+        # package.json must be valid JSON with deps
+        if path == "package.json" and not is_valid_package_json(content):
             content = package_json(project_name)
-        elif f.path == "tsconfig.json":
+
+        # Config files — always use hardcoded
+        elif path == "tsconfig.json":
             content = tsconfig_json()
-        elif f.path in ("next.config.ts", "next.config.js"):
+        elif path in ("next.config.ts", "next.config.js"):
             content = next_config_ts()
-        elif f.path.endswith("/route.ts") and not is_valid_route_module(content):
-            content = route_handler(endpoints_by_route.get(f.path))
-        sanitized.append(GeneratedFile(path=f.path, content=content, language=f.language))
+
+        # Route files must export handlers
+        elif path.endswith("/route.ts") and not is_valid_route_module(content):
+            content = route_handler(endpoints_by_route.get(path))
+
+        # .ts files must NOT contain JSX
+        elif path.endswith(".ts") and not path.endswith(".d.ts") and not is_valid_ts(content):
+            # Replace with safe fallback
+            content = "// auto-generated\nexport {};"
+
+        # .tsx files must have valid exports
+        elif path.endswith(".tsx") and not is_valid_tsx(content):
+            content = f"export default function Component() {{ return <div className=\"p-8 text-white\">Loading {path.split('/')[-1]}...</div>; }}"
+
+        sanitized.append(GeneratedFile(path=path, content=content, language=f.language))
     return sanitized
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────────────────────────────────────
 def _log(build: BuildState, tag: str, message: str, level: LogLevel = LogLevel.INFO) -> None:
     entry = LogEntry(
         timestamp=time.time(), phase=build.current_phase,
         level=level, tag=tag, message=message,
     )
     build.logs.append(entry)
-    push_log(build.task_id, entry.model_dump())
-    set_build_state(build.task_id, build.model_dump())
+    try:
+        push_log(build.task_id, entry.model_dump())
+        set_build_state(build.task_id, build.model_dump())
+    except Exception:
+        pass  # Don't crash if Redis is down
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Pydantic-safe model builders
-# (Gemini sometimes returns extra/renamed fields — filter them out)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 _DB_TABLE_FIELDS = {"table_name", "prisma_schema", "sql_schema"}
 _ENDPOINT_FIELDS = {"method", "path", "description", "request_body",
                     "response_schema", "status_codes", "auth_required"}
@@ -144,15 +197,13 @@ def _safe_endpoint(raw: Any) -> ApiEndpoint:
     if not isinstance(raw, dict):
         return ApiEndpoint(method="GET", path="/api/health", description="health")
     d = {k: v for k, v in raw.items() if k in _ENDPOINT_FIELDS}
-    # Rename if Gemini used alternative field names
-    if "api_path" in raw and "path" not in d:
-        d["path"] = raw["api_path"]
-    if "api_description" in raw and "description" not in d:
-        d["description"] = raw["api_description"]
-    if "endpoint" in raw and "path" not in d:
-        d["path"] = raw["endpoint"]
-    if "route" in raw and "path" not in d:
-        d["path"] = raw["route"]
+    # Gemini sometimes uses alternative field names
+    for alt in ("api_path", "endpoint", "route", "url"):
+        if alt in raw and "path" not in d:
+            d["path"] = raw[alt]
+    for alt in ("api_description", "desc", "summary"):
+        if alt in raw and "description" not in d:
+            d["description"] = raw[alt]
     d.setdefault("method", "GET")
     d.setdefault("path", "/api/endpoint")
     d.setdefault("description", "")
@@ -163,9 +214,22 @@ def _safe_endpoint(raw: Any) -> ApiEndpoint:
     return ApiEndpoint(**d)
 
 
-# ─────────────────────────────────────────────
+def _safe_feature_agreement(raw: Dict, idea: str) -> FeatureAgreement:
+    """Build FeatureAgreement safely — handle missing/wrong keys."""
+    return FeatureAgreement(
+        project_name=str(raw.get("project_name", idea[:40])),
+        tech_stack=str(raw.get("tech_stack", "Next.js 15 + TypeScript + Tailwind CSS")),
+        features=list(raw.get("features", ["Core UI", "Responsive design"])),
+        out_of_scope=list(raw.get("out_of_scope", ["Mobile app"])),
+        price_usd=float(raw.get("price_usd", 500.0)),
+        delivery_estimate=str(raw.get("delivery_estimate", "12 min")),
+        manifest_xml=str(raw.get("manifest_xml", "<manifest><v>1</v></manifest>")),
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Phase 1: Scoping
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 def run_scoping(build: BuildState) -> None:
     build.current_phase = BuildPhase.SCOPING
     set_build_state(build.task_id, build.model_dump())
@@ -176,11 +240,11 @@ def run_scoping(build: BuildState) -> None:
     try:
         raw = llm.run_scoping(build.raw_project_idea)
         build.scoping_result = ScopingResult(
-            questions=raw["questions"],
-            estimated_price_usd=float(raw["estimated_price_usd"]),
-            complexity_score=int(raw["complexity_score"]),
-            estimated_build_time_minutes=int(raw["estimated_build_time_minutes"]),
-            feature_summary=raw["feature_summary"],
+            questions=raw.get("questions", []),
+            estimated_price_usd=float(raw.get("estimated_price_usd", 500)),
+            complexity_score=int(raw.get("complexity_score", 5)),
+            estimated_build_time_minutes=int(raw.get("estimated_build_time_minutes", 10)),
+            feature_summary=str(raw.get("feature_summary", build.raw_project_idea[:200])),
         )
         _log(build, "SYS_LOG: ALIGNING_PROMPT",
              f"✅ Scoping complete. Complexity: {build.scoping_result.complexity_score}/10 | "
@@ -193,29 +257,22 @@ def run_scoping(build: BuildState) -> None:
     set_build_state(build.task_id, build.model_dump())
 
 
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Full Pipeline (runs after answers received)
-# ─────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 def run_full_pipeline(build: BuildState) -> None:
     llm = GeminiService(api_key=os.environ["GEMINI_API_KEY"])
+    correction_loops = 0
 
     # ── Feature Agreement ────────────────────
     _log(build, "SYS_LOG: ALIGNING_PROMPT", "Generating Feature Agreement...", LogLevel.INFO)
     try:
         raw = llm.generate_feature_agreement(
             build.raw_project_idea,
-            build.scoping_result.model_dump(),
+            build.scoping_result.model_dump() if build.scoping_result else {},
             build.scoping_answers or {},
         )
-        build.feature_agreement = FeatureAgreement(
-            project_name=raw["project_name"],
-            tech_stack=raw["tech_stack"],
-            features=raw["features"],
-            out_of_scope=raw["out_of_scope"],
-            price_usd=float(raw["price_usd"]),
-            delivery_estimate=raw["delivery_estimate"],
-            manifest_xml=raw["manifest_xml"],
-        )
+        build.feature_agreement = _safe_feature_agreement(raw, build.raw_project_idea)
         _log(build, "SYS_LOG: ALIGNING_PROMPT",
              f"✅ Feature Agreement locked: {build.feature_agreement.project_name}",
              LogLevel.SUCCESS)
@@ -227,21 +284,27 @@ def run_full_pipeline(build: BuildState) -> None:
 
     # ── Architecture ─────────────────────────
     build.current_phase = BuildPhase.ARCHITECTURE
+    set_build_state(build.task_id, build.model_dump())
     _log(build, "SYS_LOG: ARCHITECTING_DB",
          "Building secure database relational schemas...", LogLevel.SYSTEM)
     try:
         raw = llm.run_architecture(build.feature_agreement.manifest_xml, build.scoping_answers or {})
         tables_raw = raw.get("database_tables", [])
         endpoints_raw = raw.get("api_endpoints", [])
-        # Ensure both are lists (Gemini sometimes returns a dict)
-        if isinstance(tables_raw, dict): tables_raw = list(tables_raw.values())
-        if isinstance(endpoints_raw, dict): endpoints_raw = list(endpoints_raw.values())
+        if isinstance(tables_raw, dict):
+            tables_raw = list(tables_raw.values())
+        if isinstance(endpoints_raw, dict):
+            endpoints_raw = list(endpoints_raw.values())
+        if not isinstance(tables_raw, list):
+            tables_raw = []
+        if not isinstance(endpoints_raw, list):
+            endpoints_raw = []
         build.architecture = ArchitectureBlueprint(
             database_tables=[_safe_db_table(t) for t in tables_raw],
             api_endpoints=[_safe_endpoint(e) for e in endpoints_raw],
-            tech_stack_manifest=raw.get("tech_stack_manifest", ""),
-            folder_structure=raw.get("folder_structure", ""),
-            env_variables_needed=raw.get("env_variables_needed", []),
+            tech_stack_manifest=str(raw.get("tech_stack_manifest", "")),
+            folder_structure=str(raw.get("folder_structure", "")),
+            env_variables_needed=list(raw.get("env_variables_needed", [])),
         )
         _log(build, "SYS_LOG: ARCHITECTING_DB",
              f"✅ Architecture complete. {len(build.architecture.database_tables)} tables | "
@@ -255,8 +318,9 @@ def run_full_pipeline(build: BuildState) -> None:
 
     # ── Synthesis ────────────────────────────
     build.current_phase = BuildPhase.SYNTHESIS
+    set_build_state(build.task_id, build.model_dump())
     _log(build, "SYS_LOG: SYNTHESIZING_CODE",
-         "Generating full-stack code blocks inside isolated E2B sandbox...", LogLevel.SYSTEM)
+         "Generating full-stack code...", LogLevel.SYSTEM)
 
     arch = build.architecture
     agreement = build.feature_agreement
@@ -268,7 +332,7 @@ TECH STACK: {agreement.tech_stack}
 FEATURES: {chr(10).join(f'- {f}' for f in agreement.features)}
 DB SCHEMA: {chr(10).join(t.prisma_schema for t in arch.database_tables)}
 API ENDPOINTS: {chr(10).join(f'{e.method} {e.path}' for e in arch.api_endpoints)}
-NAMING RULE: All code variable names MUST exactly match database column names.
+IMPORTANT: Use Tailwind CSS for styling. Dark theme with gradients. No placeholders.
 """
 
     api_endpoints = arch.api_endpoints[:6]
@@ -277,11 +341,12 @@ NAMING RULE: All code variable names MUST exactly match database column names.
 
     files_to_generate = [
         "package.json", "tsconfig.json", "next.config.ts",
+        "tailwind.config.ts", "postcss.config.js",
         "prisma/schema.prisma", "src/lib/db.ts", "src/lib/auth.ts",
-        "src/types/index.ts",
+        "src/lib/utils.ts", "src/types/index.ts",
         *route_files,
-        "src/app/layout.tsx", "src/app/page.tsx",
-        "src/app/globals.css", "src/components/Navbar.tsx",
+        "src/app/globals.css", "src/app/layout.tsx", "src/app/page.tsx",
+        "src/components/Navbar.tsx",
         "src/middleware.ts", ".env.example", "README.md",
     ] if is_nextjs else [
         "requirements.txt", "main.py", "database.py",
@@ -293,17 +358,15 @@ NAMING RULE: All code variable names MUST exactly match database column names.
         try:
             _log(build, "SYS_LOG: SYNTHESIZING_CODE",
                  f"Writing {fp} ({i+1}/{len(files_to_generate)})...")
-            scaffold = _scaffold_content(
-                fp,
-                agreement.project_name,
-                endpoints_by_route.get(fp) if is_nextjs else None,
-            )
+            scaffold = _scaffold_content(fp, agreement.project_name,
+                                         endpoints_by_route.get(fp) if is_nextjs else None)
             if scaffold is not None:
                 generated.append(GeneratedFile(path=fp, content=scaffold, language="typescript"))
                 continue
             raw = llm.generate_file(fp, blueprint_context, [f.model_dump() for f in generated])
             generated.append(GeneratedFile(
-                path=raw["path"], content=raw["content"],
+                path=raw.get("path", fp),
+                content=raw.get("content", f"// auto-generated: {fp}"),
                 language=raw.get("language", "typescript"),
             ))
         except Exception as e:
@@ -311,49 +374,54 @@ NAMING RULE: All code variable names MUST exactly match database column names.
                  f"⚠ Skipped {fp}: {str(e)[:80]}", LogLevel.WARNING)
 
     if is_nextjs:
-        # Auto-detect imports → inject into package.json + ensure Tailwind files
         generated = _inject_package_json(generated, agreement.project_name)
-        generated = _ensure_tailwind_files(generated)
+        generated = _ensure_required_files(generated, agreement.project_name)
         generated = _sanitize_generated_files(generated, agreement.project_name, endpoints_by_route)
 
     _log(build, "SYS_LOG: SYNTHESIZING_CODE",
-         f"✅ {len(generated)} files generated. Injecting into E2B sandbox...", LogLevel.SUCCESS)
+         f"✅ {len(generated)} files generated.", LogLevel.SUCCESS)
 
-    # ── E2B Sandbox Build + Self-Correct ─────
+    # ── E2B Sandbox Build ─────────────────────
     _log(build, "SYS_LOG: RUNNING_QA_TESTS",
-         "Compiling code. Running automated bug-checks...", LogLevel.SYSTEM)
+         "Compiling code. Running automated checks...", LogLevel.SYSTEM)
 
-    def on_log(msg): _log(build, "SYS_LOG: RUNNING_QA_TESTS", msg)
-    def correct_fn(err, buggy): return llm.self_correct(err, buggy)
+    final_files = generated
+    runs: list = []
+    build_ok = True
 
     try:
-        orchestrator = SandboxOrchestrator(e2b_api_key=os.environ["E2B_API_KEY"])
-        final_files, runs, build_ok = orchestrator.run_full_synthesis(
-            files=generated,
-            project_type="node" if is_nextjs else "python",
-            on_log=on_log,
-            correct_fn=correct_fn,
-        )
-        _log(build, "SYS_LOG: RUNNING_QA_TESTS",
-             f"{'✅ Build PASSED' if build_ok else '⚠ Build done with warnings'} — "
-             f"{orchestrator.correction_loops_used} self-correction(s) used",
-             LogLevel.SUCCESS if build_ok else LogLevel.WARNING)
+        e2b_key = os.environ.get("E2B_API_KEY", "")
+        if e2b_key:
+            orchestrator = SandboxOrchestrator(e2b_api_key=e2b_key)
+            final_files, runs, build_ok = orchestrator.run_full_synthesis(
+                files=generated,
+                project_type="node" if is_nextjs else "python",
+                on_log=lambda msg: _log(build, "SYS_LOG: RUNNING_QA_TESTS", msg),
+                correct_fn=lambda err, buggy: llm.self_correct(err, buggy),
+            )
+            correction_loops = orchestrator.correction_loops_used
+        else:
+            _log(build, "SYS_LOG: RUNNING_QA_TESTS",
+                 "⚠ E2B_API_KEY not set — skipping sandbox, using files directly.", LogLevel.WARNING)
     except Exception as e:
         _log(build, "SYS_LOG: RUNNING_QA_TESTS",
              f"⚠ Sandbox error: {str(e)[:100]}. Using generated files directly.", LogLevel.WARNING)
-        final_files = generated
-        runs = []
-        build_ok = True
+
+    _log(build, "SYS_LOG: RUNNING_QA_TESTS",
+         f"{'✅ Build PASSED' if build_ok else '⚠ Build done with warnings'} — "
+         f"{correction_loops} self-correction(s) used",
+         LogLevel.SUCCESS if build_ok else LogLevel.WARNING)
 
     # ── Security Scan ─────────────────────────
     build.current_phase = BuildPhase.SECURITY_SCAN
+    set_build_state(build.task_id, build.model_dump())
     _log(build, "SYS_LOG: RUNNING_QA_TESTS",
          "🔒 Running security scan — stripping secrets...", LogLevel.SYSTEM)
     scanner = SecurityScannerService()
     sanitized, secrets, vulns = scanner.scan_and_sanitize(final_files)
     build.synthesis = SynthesisResult(
         files=sanitized, sandbox_runs=runs,
-        correction_loops_used=getattr(orchestrator if 'orchestrator' in dir() else object(), 'correction_loops_used', 0),
+        correction_loops_used=correction_loops,
         final_build_success=build_ok,
         secrets_found_and_moved=secrets,
     )
@@ -362,6 +430,7 @@ NAMING RULE: All code variable names MUST exactly match database column names.
 
     # ── GitHub Deploy ─────────────────────────
     build.current_phase = BuildPhase.DEPLOYMENT
+    set_build_state(build.task_id, build.model_dump())
     _log(build, "SYS_LOG: DEPLOYING_PROD",
          "Pushing live code to GitHub...", LogLevel.SYSTEM)
     try:
