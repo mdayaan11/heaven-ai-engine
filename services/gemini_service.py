@@ -11,10 +11,26 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Prompts — each one tells Gemini EXACTLY what format to return
+# ─────────────────────────────────────────────────────────────────────────────
+
 SCOPING_PROMPT = """You are an elite Product Manager. Analyze this project idea and produce scoping questions.
 Respond ONLY in valid compact JSON — no markdown, no code blocks, no extra text:
 {"questions":[{"question_id":"q1","question_text":"...","options":["A","B","C"],"required":true}],"estimated_price_usd":500.0,"complexity_score":6,"estimated_build_time_minutes":12,"feature_summary":"..."}
 Generate 3-5 highly relevant questions specific to the project type."""
+
+AGREEMENT_PROMPT = """You are a Product Manager. Generate a Feature Agreement.
+
+CRITICAL RULES for project_name:
+- Extract a SHORT, BRANDABLE project name (2-4 words max)
+- NEVER use the user's raw prompt as the name
+- Examples: "build me a cafe website" → "Café Lumière" or "Urban Brew"
+- Examples: "make a 3d portfolio" → "Studio 3D" or "Creative Space"
+- Examples: "e-commerce for shoes" → "Sole Market" or "Step Style"
+
+Respond ONLY in valid compact JSON — no markdown:
+{"project_name":"SHORT BRAND NAME","tech_stack":"Next.js 15 + TypeScript + Tailwind CSS","features":["feature1","feature2"],"out_of_scope":["item1"],"price_usd":500.0,"delivery_estimate":"12 min","manifest_xml":"<manifest><v>1</v></manifest>"}"""
 
 ARCHITECTURE_PROMPT = """You are a Software Architect. Generate a minimal technical blueprint.
 Keep ALL string values SHORT (one line max). No SQL. No Prisma syntax in strings.
@@ -24,34 +40,42 @@ Respond ONLY in valid compact JSON — no markdown:
 SYNTHESIS_PROMPT = """You are a world-class Senior Full-Stack Developer and UI/UX Designer.
 Generate a COMPLETE, PRODUCTION-READY file. Rules:
 - NO placeholders. NO TODOs. NO "// implement here". Write REAL working code.
+- Add 'use client'; at the top if the component uses useState, useEffect, onClick, or any interactivity.
 - Use Tailwind CSS classes for ALL styling. Make it VISUALLY STUNNING.
 - Use real colors (gradients, dark themes). Real content. Real functionality.
-- For page.tsx files: Create a beautiful, modern UI with hero sections, cards, animations.
-- For 3D projects: Use dynamic imports with ssr:false for three.js components.
 - For components: Make them interactive with hover effects, transitions.
-- Import only packages that are in the project's package.json.
+- Import only from: react, next/link, next/image, next/dynamic, lucide-react.
 
 Respond ONLY in valid JSON — no markdown:
 {"path":"src/app/page.tsx","content":"...COMPLETE FILE CONTENT...","language":"typescript"}"""
 
-AGREEMENT_PROMPT = """You are a Product Manager. Generate a Feature Agreement.
-Respond ONLY in valid compact JSON — no markdown:
-{"project_name":"...","tech_stack":"Next.js 15 + TypeScript + Tailwind CSS","features":["feature1","feature2"],"out_of_scope":["item1"],"price_usd":500.0,"delivery_estimate":"12 min","manifest_xml":"<manifest><v>1</v></manifest>"}"""
+PAGE_QUALITY_PROMPT = """You are a world-class UI/UX Developer. Generate src/app/page.tsx.
 
-PAGE_QUALITY_PROMPT = """You are a world-class UI/UX Developer. Generate src/app/page.tsx for this project.
+YOU MUST generate a COMPLETE, BEAUTIFUL, INTERACTIVE page with ALL of these sections:
+1. Fixed glassmorphism navbar with logo + navigation links
+2. Massive hero section with gradient text, tagline, and CTA buttons
+3. Statistics row (e.g. "12+ Years", "50k+ Customers", "4.9★ Rating")
+4. Feature/service cards grid (3-6 cards) with icons from lucide-react
+5. Testimonials/reviews section with star ratings
+6. Contact or CTA section with a form or action
+7. Footer with links and copyright
 
-REQUIREMENTS:
-1. Beautiful dark theme with gradients (bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900)
-2. Real content specific to the project (not placeholder text)
-3. Hero section with project name + tagline
-4. Feature showcase cards with icons (use lucide-react)
-5. Smooth hover effects (hover:scale-105, transition-all duration-300)
-6. Professional typography (font-bold, tracking-tight, text-white)
-7. Call-to-action buttons with gradient backgrounds
-8. For 3D projects: wrap THREE.js components in dynamic() with ssr:false
+STYLING RULES:
+- Start with: 'use client';
+- Dark theme: bg-gradient-to-br from-[#0a0a0a] via-[#1a0f2e] to-[#0d0d0d]
+- Cards: bg-white/[0.03] border border-white/[0.06] rounded-2xl
+- Hover: hover:scale-[1.02] hover:border-purple-500/30 transition-all duration-300
+- Gradients on text: bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent
+- Buttons: bg-gradient-to-r from-purple-500 to-pink-600 rounded-full
+- Import icons ONLY from lucide-react
+- Write ALL content inline — real text, real prices, real descriptions
+- Make buttons and tabs interactive with useState
 
-DO NOT use: placeholder text, grey boxes, Lorem ipsum, "Coming Soon", white backgrounds.
-DO NOT import packages not in package.json.
+DO NOT:
+- Use placeholder text, Lorem ipsum, "Coming Soon", or empty sections
+- Import packages not in package.json (only use: react, lucide-react, next/link, next/dynamic)
+- Use white or light backgrounds
+- Generate less than 100 lines of code
 
 Respond ONLY in valid JSON:
 {"path":"src/app/page.tsx","content":"COMPLETE_CODE","language":"typescript"}"""
@@ -69,7 +93,7 @@ class GeminiService:
             params={"key": self.api_key},
             json={
                 "contents": [{"parts": [{"text": f"{system}\n\n---\n\n{user}"}], "role": "user"}],
-                "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
+                "generationConfig": {"temperature": 0.3, "maxOutputTokens": 8192},
             },
         )
         resp.raise_for_status()
@@ -82,7 +106,6 @@ class GeminiService:
         match = re.search(r"(\{[\s\S]*\}|\[[\s\S]*\])", text)
         if match:
             text = match.group(1)
-        # Fix trailing commas
         text = re.sub(r",\s*([\}\]])", r"\1", text)
         return text
 
@@ -93,8 +116,7 @@ class GeminiService:
             raw = self._call(system, user)
             cleaned = self._fix_json(raw)
             return json.loads(cleaned)
-        except json.JSONDecodeError as e:
-            # Retry asking Gemini to fix its own JSON
+        except json.JSONDecodeError:
             try:
                 fix_prompt = f"Return ONLY valid JSON, no markdown. Fix this broken JSON:\n{cleaned[:3000]}"
                 raw2 = self._call("You fix broken JSON. Return ONLY the fixed JSON object, nothing else.", fix_prompt)
@@ -107,6 +129,30 @@ class GeminiService:
             if default is not None:
                 return default
             raise
+
+    # ── Name extraction ────────────────────────────────────────────────────
+    @staticmethod
+    def _extract_project_name(idea: str) -> str:
+        """Convert a raw user prompt into a short brand name."""
+        # Remove command words
+        cleaned = re.sub(
+            r"^(build|make|create|design|generate|develop|code)\s+(me\s+)?(a\s+)?",
+            "", idea.strip(), flags=re.IGNORECASE
+        ).strip()
+        # Remove filler words
+        cleaned = re.sub(
+            r"\b(website|web\s*site|web\s*app|application|app|page|landing\s*page|for|with|using|please|pls)\b",
+            "", cleaned, flags=re.IGNORECASE
+        ).strip()
+        # Clean up extra spaces and dashes
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" -,.")
+        # Capitalize nicely
+        if cleaned:
+            # If it's very short, just title-case it
+            words = cleaned.split()[:5]  # Max 5 words
+            name = " ".join(w.capitalize() for w in words)
+            return name if len(name) >= 2 else "Heaven Project"
+        return "Heaven Project"
 
     # ── Default fallbacks ──────────────────────────────────────────────────
     def _default_scoping(self, idea: str) -> Dict:
@@ -133,9 +179,9 @@ class GeminiService:
 
     def _default_agreement(self, idea: str) -> Dict:
         return {
-            "project_name": idea[:40],
+            "project_name": self._extract_project_name(idea),
             "tech_stack": "Next.js 15 + TypeScript + Tailwind CSS",
-            "features": ["Beautiful UI", "User authentication", "Core functionality", "Responsive design"],
+            "features": ["Beautiful UI", "Interactive components", "Responsive design", "Dark theme"],
             "out_of_scope": ["Mobile app", "Advanced analytics"],
             "price_usd": 500.0,
             "delivery_estimate": "12 min build",
@@ -152,7 +198,6 @@ class GeminiService:
             f"Project: {manifest[:500]}\nAnswers: {json.dumps(answers)}",
             self._default_architecture()
         )
-        # Normalize api_endpoints field names to avoid Pydantic conflicts
         endpoints = raw.get("api_endpoints", [])
         if isinstance(endpoints, dict):
             endpoints = list(endpoints.values())
@@ -161,7 +206,6 @@ class GeminiService:
             if not isinstance(ep, dict):
                 continue
             n = dict(ep)
-            # Rename alternative field names Gemini sometimes uses
             for alt in ("api_path", "endpoint", "route", "url"):
                 if alt in n and "path" not in n:
                     n["path"] = n.pop(alt)
@@ -188,7 +232,7 @@ class GeminiService:
             fallback_content = fallback_page_tsx(proj_name)
         elif path.endswith("Navbar.tsx") or path.endswith("navbar.tsx"):
             fallback_content = f"""'use client';
-import {{ Coffee, Menu, X }} from 'lucide-react';
+import {{ Menu, X }} from 'lucide-react';
 import {{ useState }} from 'react';
 
 export default function Navbar() {{
@@ -201,9 +245,12 @@ export default function Navbar() {{
         </h1>
         <div className="hidden md:flex gap-6 text-sm text-gray-300">
           <a href="#" className="hover:text-white transition-colors">Home</a>
-          <a href="#" className="hover:text-white transition-colors">About</a>
-          <a href="#" className="hover:text-white transition-colors">Contact</a>
+          <a href="#about" className="hover:text-white transition-colors">About</a>
+          <a href="#contact" className="hover:text-white transition-colors">Contact</a>
         </div>
+        <button onClick={{() => setOpen(!open)}} className="md:hidden text-white">
+          {{open ? <X /> : <Menu />}}
+        </button>
       </div>
     </nav>
   );
@@ -211,18 +258,27 @@ export default function Navbar() {{
 """
         elif path.endswith(".tsx"):
             name = path.split("/")[-1].replace(".tsx", "").replace("-", " ").title().replace(" ", "")
-            fallback_content = f"export default function {name}() {{ return <div className=\"p-8 text-white\">Section: {name}</div>; }}"
+            fallback_content = f"""'use client';
+export default function {name}() {{
+  return (
+    <section className="py-16 px-6">
+      <div className="max-w-7xl mx-auto">
+        <h2 className="text-3xl font-bold text-white mb-4">{name}</h2>
+        <p className="text-gray-400">Content section</p>
+      </div>
+    </section>
+  );
+}}
+"""
         elif path.endswith(".ts") and not path.endswith(".d.ts"):
             fallback_content = "// auto-generated\nexport {};"
         elif path.endswith(".css"):
             fallback_content = "/* auto-generated */"
-        elif path.endswith(".prisma"):
-            fallback_content = 'datasource db {\\n  provider = "postgresql"\\n  url = env("DATABASE_URL")\\n}\\ngenerator client {\\n  provider = "prisma-client-js"\\n}'
         else:
             fallback_content = f"// auto-generated: {path}"
         return self._parse_json(
             prompt,
-            f"Generate: {path}\nProject context:\n{context[:1500]}\nFiles already done:\n{done}",
+            f"Generate: {path}\nProject context:\n{context[:2000]}\nFiles already done:\n{done}",
             {"path": path, "content": fallback_content, "language": "typescript"}
         )
 
@@ -234,11 +290,16 @@ export default function Navbar() {{
         )
 
     def generate_feature_agreement(self, idea: str, scoping: Dict, answers: Dict) -> Dict:
-        return self._parse_json(
+        result = self._parse_json(
             AGREEMENT_PROMPT,
             f"Project: {idea}\nScoping: {json.dumps(scoping)[:400]}\nAnswers: {json.dumps(answers)}",
             self._default_agreement(idea)
         )
+        # Safety check: if Gemini used the raw prompt as project name, fix it
+        raw_name = result.get("project_name", "")
+        if raw_name.lower().startswith(("build", "make", "create", "design", "generate")) or len(raw_name) > 30:
+            result["project_name"] = self._extract_project_name(idea)
+        return result
 
     def __del__(self):
         try:

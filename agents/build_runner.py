@@ -216,8 +216,12 @@ def _safe_endpoint(raw: Any) -> ApiEndpoint:
 
 def _safe_feature_agreement(raw: Dict, idea: str) -> FeatureAgreement:
     """Build FeatureAgreement safely — handle missing/wrong keys."""
+    name = str(raw.get("project_name", ""))
+    # If Gemini used the raw prompt as name, extract a proper one
+    if not name or name.lower().startswith(("build", "make", "create", "design", "generate")) or len(name) > 30:
+        name = GeminiService._extract_project_name(idea)
     return FeatureAgreement(
-        project_name=str(raw.get("project_name", idea[:40])),
+        project_name=name,
         tech_stack=str(raw.get("tech_stack", "Next.js 15 + TypeScript + Tailwind CSS")),
         features=list(raw.get("features", ["Core UI", "Responsive design"])),
         out_of_scope=list(raw.get("out_of_scope", ["Mobile app"])),
