@@ -174,21 +174,50 @@ class GeminiService:
 
     def generate_file(self, path: str, context: str, existing: list) -> Dict:
         done = "\n".join(f"- {f['path']}" for f in existing[:10])
+        # Extract project name from context
+        proj_name = "My App"
+        for line in context.split("\n"):
+            if line.strip().startswith("PROJECT:"):
+                proj_name = line.split(":", 1)[1].strip()
+                break
         # Use enhanced prompt for main page
         prompt = PAGE_QUALITY_PROMPT if path in ("src/app/page.tsx", "app/page.tsx") else SYNTHESIS_PROMPT
-        # Smart fallback based on file type
-        is_tsx = path.endswith(".tsx")
-        is_ts = path.endswith(".ts") and not is_tsx
-        is_css = path.endswith(".css")
-        is_prisma = path.endswith(".prisma")
-        if is_tsx:
-            fallback_content = "export default function Component() { return <div className=\"p-8 text-white\">Loading...</div>; }"
-        elif is_ts:
+        # Smart fallback based on file type — NEVER a blank page
+        if path in ("src/app/page.tsx", "app/page.tsx"):
+            from agents.scaffold_templates import fallback_page_tsx
+            fallback_content = fallback_page_tsx(proj_name)
+        elif path.endswith("Navbar.tsx") or path.endswith("navbar.tsx"):
+            fallback_content = f"""'use client';
+import {{ Coffee, Menu, X }} from 'lucide-react';
+import {{ useState }} from 'react';
+
+export default function Navbar() {{
+  const [open, setOpen] = useState(false);
+  return (
+    <nav className="fixed top-0 w-full z-50 backdrop-blur-xl bg-black/30 border-b border-white/10">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
+        <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+          {proj_name}
+        </h1>
+        <div className="hidden md:flex gap-6 text-sm text-gray-300">
+          <a href="#" className="hover:text-white transition-colors">Home</a>
+          <a href="#" className="hover:text-white transition-colors">About</a>
+          <a href="#" className="hover:text-white transition-colors">Contact</a>
+        </div>
+      </div>
+    </nav>
+  );
+}}
+"""
+        elif path.endswith(".tsx"):
+            name = path.split("/")[-1].replace(".tsx", "").replace("-", " ").title().replace(" ", "")
+            fallback_content = f"export default function {name}() {{ return <div className=\"p-8 text-white\">Section: {name}</div>; }}"
+        elif path.endswith(".ts") and not path.endswith(".d.ts"):
             fallback_content = "// auto-generated\nexport {};"
-        elif is_css:
+        elif path.endswith(".css"):
             fallback_content = "/* auto-generated */"
-        elif is_prisma:
-            fallback_content = "datasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\ngenerator client {\n  provider = \"prisma-client-js\"\n}"
+        elif path.endswith(".prisma"):
+            fallback_content = 'datasource db {\\n  provider = "postgresql"\\n  url = env("DATABASE_URL")\\n}\\ngenerator client {\\n  provider = "prisma-client-js"\\n}'
         else:
             fallback_content = f"// auto-generated: {path}"
         return self._parse_json(
