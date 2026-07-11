@@ -39,6 +39,7 @@ from agents.scaffold_templates import (
     types_index_ts,
     utils_ts,
 )
+from agents.page_templates import detect_project_type, get_premium_page
 from services.gemini_service import GeminiService
 from services.e2b_service import SandboxOrchestrator
 from services.security_scanner import SecurityScannerService
@@ -49,7 +50,7 @@ from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
 # ─────────────────────────────────────────────────────────────────────────────
 # Scaffolding: hardcoded files that Gemini must NEVER generate
 # ─────────────────────────────────────────────────────────────────────────────
-def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None) -> Optional[str]:
+def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None, raw_idea: str = "") -> Optional[str]:
     """Return hardcoded content for critical files. Returns None if Gemini should generate it."""
     p = path.lower()
     # Config files
@@ -83,6 +84,10 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
     # Layout — critical, app won't render without it
     if p in ("src/app/layout.tsx", "app/layout.tsx"):
         return layout_tsx(project_name)
+    # Page — PREMIUM template based on project type
+    if p in ("src/app/page.tsx", "app/page.tsx"):
+        ptype = detect_project_type(raw_idea) if raw_idea else "business"
+        return get_premium_page(ptype, project_name)
     # Static files that don't need LLM
     if p == ".env.example":
         return env_example()
@@ -363,7 +368,8 @@ IMPORTANT: Use Tailwind CSS for styling. Dark theme with gradients. No placehold
             _log(build, "SYS_LOG: SYNTHESIZING_CODE",
                  f"Writing {fp} ({i+1}/{len(files_to_generate)})...")
             scaffold = _scaffold_content(fp, agreement.project_name,
-                                         endpoints_by_route.get(fp) if is_nextjs else None)
+                                         endpoints_by_route.get(fp) if is_nextjs else None,
+                                         raw_idea=build.raw_project_idea)
             if scaffold is not None:
                 generated.append(GeneratedFile(path=fp, content=scaffold, language="typescript"))
                 continue
