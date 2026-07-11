@@ -133,25 +133,86 @@ class GeminiService:
     # ── Name extraction ────────────────────────────────────────────────────
     @staticmethod
     def _extract_project_name(idea: str) -> str:
-        """Convert a raw user prompt into a short brand name."""
-        # Remove command words
+        """Convert a raw user prompt into a short brand name.
+        
+        Examples:
+          'build me a portfolio im aayan sk' → 'Aayan SK'
+          'build me a 3d cafe website' → '3D Cafe'
+          'create an e-commerce store called Urban Style' → 'Urban Style'
+          'make me a portfolio my name is John Doe' → 'John Doe'
+        """
+        text = idea.strip()
+        
+        # 1. Check for explicit name: "called X", "named X", "name is X", "name: X"
+        name_match = re.search(
+            r"(?:called|named|name\s+is|name\s*:)\s+(.+?)(?:\s*$|\s+(?:with|using|for|please))",
+            text, re.IGNORECASE
+        )
+        if name_match:
+            return name_match.group(1).strip().title()[:40]
+        
+        # 2. Check for "im X" / "i am X" / "i'm X" — extract person name
+        person_match = re.search(
+            r"(?:^|\s)(?:im|i\s*am|i'm)\s+(.+?)(?:\s*$|\s+(?:and|with|using|please))",
+            text, re.IGNORECASE
+        )
+        person_name = ""
+        if person_match:
+            person_name = person_match.group(1).strip()
+            # Remove trailing filler
+            person_name = re.sub(r"\b(and|with|please|pls|thanks)\b.*$", "", person_name, flags=re.IGNORECASE).strip(" .,")
+        
+        # 3. Strip command words from beginning
         cleaned = re.sub(
             r"^(build|make|create|design|generate|develop|code)\s+(me\s+)?(a\s+)?",
-            "", idea.strip(), flags=re.IGNORECASE
+            "", text, flags=re.IGNORECASE
         ).strip()
-        # Remove filler words
+        
+        # 4. Detect project type for suffix
+        type_words = {
+            "portfolio": "Portfolio", "cafe": "Café", "coffee": "Café",
+            "restaurant": "Kitchen", "shop": "Store", "store": "Store",
+            "ecommerce": "Market", "e-commerce": "Market",
+            "blog": "Blog", "agency": "Studio", "gym": "Fitness",
+            "saas": "Platform", "dashboard": "Dashboard",
+        }
+        detected_type = ""
+        for keyword, label in type_words.items():
+            if keyword in cleaned.lower():
+                detected_type = label
+                break
+        
+        # 5. Strip ALL filler/type words
         cleaned = re.sub(
-            r"\b(website|web\s*site|web\s*app|application|app|page|landing\s*page|for|with|using|please|pls)\b",
+            r"\b(website|web\s*site|web\s*app|application|app|page|landing\s*page|"
+            r"portfolio|cafe|coffee|restaurant|shop|store|ecommerce|e-commerce|"
+            r"blog|agency|gym|saas|dashboard|3d|animated|animation|"
+            r"for|with|using|please|pls|im|i\s*am|i'm|my|name|is|of|mine|the|"
+            r"online|modern|beautiful|stylish|aesthetic|cool|awesome|best|top|"
+            r"build|make|create|design|full|stack|responsive)\b",
             "", cleaned, flags=re.IGNORECASE
         ).strip()
-        # Clean up extra spaces and dashes
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -,.")
-        # Capitalize nicely
-        if cleaned:
-            # If it's very short, just title-case it
-            words = cleaned.split()[:5]  # Max 5 words
+        
+        # 6. Build final name
+        if person_name and detected_type:
+            # "im aayan sk" + portfolio → "Aayan SK"
+            return person_name.title()[:30]
+        if person_name:
+            return person_name.title()[:30]
+        if cleaned and len(cleaned) >= 2:
+            words = cleaned.split()[:4]
             name = " ".join(w.capitalize() for w in words)
-            return name if len(name) >= 2 else "Heaven Project"
+            if detected_type and detected_type.lower() not in name.lower():
+                name = f"{name} {detected_type}"
+            return name[:40]
+        if detected_type:
+            return detected_type
+        
+        # 7. Check for "3d" in original
+        if "3d" in text.lower():
+            return "3D " + (detected_type or "Studio")
+        
         return "Heaven Project"
 
     # ── Default fallbacks ──────────────────────────────────────────────────
