@@ -40,11 +40,15 @@ from agents.scaffold_templates import (
     utils_ts,
 )
 from agents.page_templates import detect_project_type, get_premium_page
+from agents.dynamic_builder import build_dynamic_page
 from services.gemini_service import GeminiService
 from services.e2b_service import SandboxOrchestrator
 from services.security_scanner import SecurityScannerService
 from services.github_service import GitHubService
 from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
+
+# Module-level reference so _scaffold_content can call Gemini
+_current_llm: GeminiService | None = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,6 +56,7 @@ from tasks.build_tasks import push_log, set_build_state, get_scoping_answers
 # ─────────────────────────────────────────────────────────────────────────────
 def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = None, raw_idea: str = "") -> Optional[str]:
     """Return hardcoded content for critical files. Returns None if Gemini should generate it."""
+    global _current_llm
     p = path.lower()
     # Config files
     if p == "package.json":
@@ -84,10 +89,11 @@ def _scaffold_content(path: str, project_name: str, ep: Optional[ApiEndpoint] = 
     # Layout — critical, app won't render without it
     if p in ("src/app/layout.tsx", "app/layout.tsx"):
         return layout_tsx(project_name)
-    # Page — PREMIUM template based on project type
+    # Page — DYNAMIC: Gemini generates content, template renders layout
     if p in ("src/app/page.tsx", "app/page.tsx"):
         ptype = detect_project_type(raw_idea) if raw_idea else "business"
-        return get_premium_page(ptype, project_name)
+        llm_call = _current_llm._parse_json if _current_llm else None
+        return build_dynamic_page(ptype, project_name, raw_idea, llm_call)
     # Static files that don't need LLM
     if p == ".env.example":
         return env_example()
@@ -270,7 +276,9 @@ def run_scoping(build: BuildState) -> None:
 # Full Pipeline (runs after answers received)
 # ─────────────────────────────────────────────────────────────────────────────
 def run_full_pipeline(build: BuildState) -> None:
+    global _current_llm
     llm = GeminiService(api_key=os.environ["GEMINI_API_KEY"])
+    _current_llm = llm  # Make available to _scaffold_content for dynamic page building
     correction_loops = 0
 
     # ── Feature Agreement ────────────────────

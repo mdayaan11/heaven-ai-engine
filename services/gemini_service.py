@@ -182,14 +182,16 @@ class GeminiService:
                 detected_type = label
                 break
         
-        # 5. Strip ALL filler/type words
+        # 5. Strip ALL filler/type/cuisine/theme words
         cleaned = re.sub(
             r"\b(website|web\s*site|web\s*app|application|app|page|landing\s*page|"
             r"portfolio|cafe|coffee|restaurant|shop|store|ecommerce|e-commerce|"
             r"blog|agency|gym|saas|dashboard|3d|animated|animation|"
             r"for|with|using|please|pls|im|i\s*am|i'm|my|name|is|of|mine|the|"
             r"online|modern|beautiful|stylish|aesthetic|cool|awesome|best|top|"
-            r"build|make|create|design|full|stack|responsive)\b",
+            r"build|make|create|design|full|stack|responsive|"
+            r"bengali|indian|italian|chinese|japanese|mexican|thai|french|korean|"
+            r"cuisine|theme|keep|which|based|style|type|like|about|want|need)\b",
             "", cleaned, flags=re.IGNORECASE
         ).strip()
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" -,.")
