@@ -1,0 +1,6 @@
+[build]
+  publish = "."
+  command = "echo 'Heaven AI Static Frontend Ready'"
+
+[build.environment]
+  NODE_VERSION = "20"
