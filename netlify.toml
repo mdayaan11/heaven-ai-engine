@@ -5,3 +5,18 @@
 [build.environment]
   PYTHON_VERSION = "3.11.9"
   NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/engine"
+  to = "/engine.html"
+  status = 200
+
+[[redirects]]
+  from = "/engine_console"
+  to = "/engine.html"
+  status = 200
+
+[[redirects]]
+  from = "/frontend/engine_console"
+  to = "/engine.html"
+  status = 200
