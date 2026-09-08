@@ -82,6 +82,8 @@ async def stream_logs(task_id: str, request: Request):
     async def generator():
         idx = 0
         last_phase = None
+        scoping_sent = False
+        complete_sent = False
         while True:
             if await request.is_disconnected():
                 break
@@ -94,14 +96,16 @@ async def stream_logs(task_id: str, request: Request):
                 if phase != last_phase:
                     last_phase = phase
                     yield {"event": "phase_change", "data": json.dumps({"phase": phase})}
-                    if phase == BuildPhase.SCOPING and state.get("scoping_result"):
-                        yield {"event": "scoping_ready", "data": json.dumps(state["scoping_result"])}
-                    if phase == BuildPhase.COMPLETE and state.get("deployment"):
-                        yield {"event": "complete", "data": json.dumps(state["deployment"])}
-                        break
-                    if phase == BuildPhase.FAILED:
-                        yield {"event": "error", "data": json.dumps({"message": state.get("error_message", "Build failed")})}
-                        break
+                if not scoping_sent and state.get("scoping_result"):
+                    scoping_sent = True
+                    yield {"event": "scoping_ready", "data": json.dumps(state["scoping_result"])}
+                if phase == BuildPhase.COMPLETE and state.get("deployment") and not complete_sent:
+                    complete_sent = True
+                    yield {"event": "complete", "data": json.dumps(state["deployment"])}
+                    break
+                if phase == BuildPhase.FAILED:
+                    yield {"event": "error", "data": json.dumps({"message": state.get("error_message", "Build failed")})}
+                    break
             yield {"event": "heartbeat", "data": json.dumps({"ts": time.time()})}
             await asyncio.sleep(1.5)
     return EventSourceResponse(generator())

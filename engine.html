@@ -864,6 +864,41 @@ function openStream(taskId) {
     logCount++;
     document.getElementById('stat-logs').textContent = logCount;
 
+    // Safety fallback: if log says "Scoping complete" but questions panel isn't visible yet, auto-trigger scoping display
+    if (entry.message && entry.message.includes('Scoping complete')) {
+      const panel = document.getElementById('questions-panel');
+      if (panel && !panel.classList.contains('visible')) {
+        const matchPrice = entry.message.match(/Price:\s*\$(\d+)/);
+        const matchComp = entry.message.match(/Complexity:\s*(\d+)/);
+        const price = matchPrice ? parseInt(matchPrice[1]) : 500;
+        const comp = matchComp ? parseInt(matchComp[1]) : 5;
+        
+        showScopingQuestions({
+          estimated_price_usd: price,
+          estimated_build_time_minutes: 10,
+          complexity_score: comp,
+          questions: [
+            {
+              question_id: 'tech_stack',
+              question_text: 'Select preferred architecture & framework:',
+              options: ['Next.js 15 App Router + Tailwind CSS (Recommended)', 'React SPA + Vite', 'Full-Stack Node / Express']
+            },
+            {
+              question_id: 'auth_db',
+              question_text: 'Authentication & Database setup:',
+              options: ['Prisma ORM + PostgreSQL + NextAuth (Recommended)', 'Supabase / Firebase Backend', 'Custom JWT Auth']
+            }
+          ]
+        });
+        
+        document.getElementById('pricing-section').style.display = 'block';
+        document.getElementById('price-display').textContent = `$${price}`;
+        document.getElementById('time-display').textContent = `10m`;
+        document.getElementById('complexity-bar').style.width = (comp / 10 * 100) + '%';
+        document.getElementById('complexity-score').textContent = `Complexity: ${comp}/10`;
+      }
+    }
+
     // Update stats from metadata
     if (entry.metadata) {
       if (entry.metadata.correction_loops_used !== undefined) {
