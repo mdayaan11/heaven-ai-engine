@@ -867,9 +867,9 @@ function showScopingQuestions(scoping) {
       opts.className = 'q-options';
       q.options.forEach((opt, oi) => {
         const label = document.createElement('label');
-        label.className = 'q-option';
+        label.className = oi === 0 ? 'q-option selected' : 'q-option';
         label.innerHTML = `
-          <input type="radio" name="q_${q.question_id}" value="${escHtml(opt)}" style="accent-color:var(--blue-b);"/>
+          <input type="radio" name="q_${q.question_id}" value="${escHtml(opt)}" ${oi === 0 ? 'checked' : ''} style="accent-color:var(--blue-b);"/>
           ${escHtml(opt)}
         `;
         label.querySelector('input').addEventListener('change', () => {
@@ -880,17 +880,27 @@ function showScopingQuestions(scoping) {
       });
       div.appendChild(opts);
     } else {
-      div.innerHTML += `<input type="text" id="q_${q.question_id}" placeholder="Your answer..." style="margin-top:8px;"/>`;
+      div.innerHTML += `<input type="text" id="q_${q.question_id}" value="Standard production build" style="margin-top:8px;"/>`;
     }
     container.appendChild(div);
   });
 
   panel.classList.add('visible');
   addSeparator();
-  addLog('system', 'SYS_LOG: ALIGNING_PROMPT', '⏸ Scoping complete. Answer the questions below to proceed.', Date.now());
+  addLog('system', 'SYS_LOG: ALIGNING_PROMPT', '⚡ Scoping complete! Click "Confirm & Start Full Build" below or auto-proceeding in 10s...', Date.now());
+  try { panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e){}
+
+  if (window._autoSubmitTimer) clearTimeout(window._autoSubmitTimer);
+  window._autoSubmitTimer = setTimeout(() => {
+    if (panel.classList.contains('visible')) {
+      addLog('info', 'SYS_LOG: ALIGNING_PROMPT', '⏱ Auto-confirming default preferences to proceed with build...', Date.now());
+      submitAnswers();
+    }
+  }, 10000);
 }
 
 async function submitAnswers() {
+  if (window._autoSubmitTimer) clearTimeout(window._autoSubmitTimer);
   if (!currentTaskId) return;
   const answers = {};
   document.querySelectorAll('.q-item').forEach((item, qi) => {
@@ -899,13 +909,14 @@ async function submitAnswers() {
     const qId = radio
       ? radio.name.replace('q_', '')
       : (text ? text.id.replace('q_', '') : `q${qi + 1}`);
-    answers[qId] = radio ? radio.value : (text ? text.value : '');
+    answers[qId] = radio ? radio.value : (text ? text.value || 'Default' : 'Default');
   });
 
-  document.getElementById('submit-answers-btn').disabled = true;
+  const submitBtn = document.getElementById('submit-answers-btn');
+  if (submitBtn) submitBtn.disabled = true;
   document.getElementById('questions-panel').classList.remove('visible');
   addSeparator();
-  addLog('success', 'SYS_LOG: ALIGNING_PROMPT', '✅ Answers submitted. Starting full build pipeline...', Date.now());
+  addLog('success', 'SYS_LOG: ALIGNING_PROMPT', '✅ Preferences confirmed! Synthesizing full-stack software architecture...', Date.now());
 
   try {
     await fetch(`${API_BASE}/api/build/${currentTaskId}/answers`, {
