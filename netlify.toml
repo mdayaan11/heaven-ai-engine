@@ -3,4 +3,5 @@
   command = "echo 'Heaven AI Static Frontend Ready'"
 
 [build.environment]
+  PYTHON_VERSION = "3.11.9"
   NODE_VERSION = "20"
